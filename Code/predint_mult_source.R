@@ -1,5 +1,13 @@
 # Functions ---------------------------------------------------------------
 
+## expit function ---------------------------------------------------------
+
+expit <- function(x) {
+  return(1 / (1 + exp(-x)))
+}
+
+## change lprop start------------------------------------------------------
+
 # To change ordering of the original list of probability vectors
 rotate_list <- function(input_list, start_index) {
   
