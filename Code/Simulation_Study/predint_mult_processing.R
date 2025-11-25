@@ -2,9 +2,11 @@ library(tidyverse)
 library(patchwork)
 library(viridis)
 library(RColorBrewer)
+library(here)
 
-setwd(r"(B:\Budig\Phd\predint_mult\Code_and_Data)")
-setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
+setwd(here())
+#setwd(r"(B:\Budig\Phd\predint_mult\Code_and_Data)")
+#setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
 #setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
 # Explanation of variables ------------------------------------------------
 
@@ -12,6 +14,13 @@ setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_an
 # probabilities, equi-tailedness properties, and confidence interval widths for
 # various statistical methods. The final output is a set of long-format
 # ("tidy") data frames suitable for analysis and plotting.
+
+# cerrnas: count error: "NAs found in the working weights variable 'wz'"
+# cerrfin: count error: "Some elements in the working weights variable 'wz' are not finite"
+# cwarwz: count warning: "diagonal elements of the working weights variable 'wz' have been replaced by 1.819e-12"
+# cwarcon: count warning: "convergence not obtained in 30 IRLS iterations"
+# cwarany: count warning: any other warning
+# cwarzc: count warning: check if there are any deleted columns due to zero counts  "Deleted 2 columns of the response matrix due to zero counts"
 
 # Define constants to avoid repetition ------------------------------------
 
@@ -99,6 +108,10 @@ df_summary <- list.files(
     .groups = "drop" # Drop grouping for subsequent operations
   )
 
+
+  saveRDS(df_summary, file = ".\\Results\\intermediate_Results\\df_summary.rds")
+
+  df_summary <- readRDS(file = ".\\Results\\intermediate_Results\\df_summary.rds")
 # 2. Reshape Data to Tidy (Long) Format ------------------------------------
 
 # Pivot coverage probabilities to long format
@@ -138,7 +151,7 @@ df_eqt_long <- df_summary %>%
   ) %>%
   ungroup()
 
-
+  
 df_asymmetry <- df_summary %>%
   dplyr::select(all_of(GROUPING_VARS), total_sim, ends_with(c("_error_l", "_error_u"))) %>%
   
@@ -240,8 +253,9 @@ simulations_per_prob <- df_tot_covprob_long %>%
     total_simulations = sum(total_sim)
   )
 
-# Print the resulting table
-print(simulations_per_prob, n = 30) # Use n=30 to show all 26 rows
+unique(simulations_per_prob$total_simulations)
+
+
 
 # Plots -------------------------------------------------------------------
 
@@ -286,8 +300,11 @@ df_tot_covprob_long <- df_tot_covprob_long %>%
 ### Kompletter Plot -------------------------------------------------------
 
 plot_covprob_all <- df_tot_covprob_long %>% 
-  # filter(total_sim > 100) %>%
-  #filter(covprob_type == "covprob_sum_coverage_bonferroni" | covprob_type == "covprob_sum_coverage_mvn") %>%
+  filter(total_sim > 300) %>%
+  filter(covprob_type != "coverage_pointwise" & 
+           covprob_type != "coverage_mvn" & 
+           covprob_type != "coverage_bonferroni") %>%
+  filter(covprob_type != "coverage_bayesian_mcmc_gamma_marg" & covprob_type != "coverage_bayesian_mcmc_cauchy_marg") %>%
   ggplot( aes(x = log10(minpnk), y = covprob))+ 
   geom_point(aes(color = factor(C), shape = factor(n)), size = 2)+
   #facet_grid(phi ~.)+ 
@@ -366,7 +383,7 @@ ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\
 
 
 ## Equal Tail Probability -------------------------------------------------
-pattern <- "bisection|bisec|percentile|bayesian_mcmc_cauchy"
+pattern <- "bisection|bisec|percentile|bayesian_mcmc_cauchy_scs"
 
 new_eqt_labels <- c(
   "pointwise" = "Pointwise Norm. Approx.",
@@ -412,12 +429,12 @@ df_tot_eqt_long <- df_tot_eqt_long %>%
                                     "bonf_bisec",
                                     "percentile_bt1",
                                     "percentile_bt_gemini",
-                                   "coverage_bayesian_mcmc_cauchy_mean", 
-                                   "coverage_bayesian_mcmc_cauchy_marg", 
-                                   "coverage_bayesian_mcmc_cauchy_scs",
-                                   "coverage_bayesian_mcmc_gamma_mean", 
-                                   "coverage_bayesian_mcmc_gamma_marg",
-                                   "coverage_bayesian_mcmc_gamma_scs"))
+                                    "bayesian_mcmc_cauchy_mean", 
+                                    "bayesian_mcmc_cauchy_marg", 
+                                    "bayesian_mcmc_cauchy_scs",
+                                    "bayesian_mcmc_gamma_mean", 
+                                    "bayesian_mcmc_gamma_marg",
+                                    "bayesian_mcmc_gamma_scs"))
 
 # 1. Get the base colors from RColorBrewer (use the maximum allowed, which is 11 for "BrBG")
 base_brbg_palette <- brewer.pal(n = 11, name = "BrBG")
@@ -467,7 +484,7 @@ plot_eqt_l <- df_tot_eqt_long %>%
   theme_bw() +
   theme(axis.text.x = element_blank(),
         axis.title.x = element_blank())+
-  ylim(0.9, 1) +
+  ylim(0.9, NA) +
   ylab("Marginal Coverage Probability") +
   labs( colour =  expression(paste("Category Probabilities ", (pi[c]))))
 
@@ -485,7 +502,7 @@ plot_eqt_u <- df_tot_eqt_long %>%
   #scale_color_viridis_d()+
   scale_color_gradientn(colors = precise_palette)+
   theme_bw() +
-  ylim(0.9, 1) +
+  ylim(0.9, NA) +
   xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
   ylab("Marginal Coverage Probability") +
   labs( colour =  expression(paste("Category Probabilities ", (pi[c]))))
