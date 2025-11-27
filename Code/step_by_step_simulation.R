@@ -457,8 +457,6 @@ if (l_methods$pointwise){
   
 }
 
-gc()
-
 # use Bonferroni Adjustment to compute prediction intervals
 if (l_methods$Bonferroni){
   
@@ -527,7 +525,6 @@ if (l_methods$Bonferroni){
   
   }
 
-gc()
 
 # use Symmetrical Bisection to compute prediction intervals
 if (l_methods$bisection){
@@ -601,8 +598,6 @@ if (l_methods$bisection){
   df_sim_res <- cbind(df_sim_res, df_res_bisection_sym, df_cwi_bisection_sym, df_width_stats_bisection)
   
 }
-
-gc()
 
 # use Asymmetrical Bisection to compute prediction intervals
 if (l_methods$bisection_asym){
@@ -692,7 +687,6 @@ if (l_methods$bisection_asym){
   
 }
 
-gc()
 
 # use Bonferroni with bisection method to compute prediction intervals
 if (l_methods$Bonf_bisec){
@@ -770,7 +764,6 @@ if (l_methods$Bonf_bisec){
   
 }
 
-gc()
 
 # Frank Aufschrieb
 # y_star: bt_fut_y_star
@@ -847,8 +840,6 @@ if (l_methods$percentile_bt1) {
   
 }
 
-gc()
-
 # use Multivariate Normal Approximation to compute prediction intervals
 if (l_methods$mvn){
   
@@ -908,7 +899,6 @@ if (l_methods$mvn){
   df_sim_res <- cbind(df_sim_res, df_res_mvn, df_cwi_mvn, df_width_stats_mvn)
   
 }
-
 
 # use Percentile Bootstrap (Gemini Corrected Method) to compute prediction intervals
 if (l_methods$percentile_bt_gemini) {
@@ -989,8 +979,6 @@ if (l_methods$percentile_bt_gemini) {
   df_sim_res <- cbind(df_sim_res, df_res_percentile_bt_gemini, df_cwi_percentile_bt_gemini, df_width_stats_percentile_bt_gemini)
   
 }
-
-gc()
 
 # use Non-Parametric Bootstrap to compute prediction intervals
 if (l_methods$nonparametric_bt) {
@@ -1326,6 +1314,29 @@ m <- df_sim_settings$m[[1]]
 alpha <- df_sim_settings$alpha[[1]]
 stan_model = mod_cauchy
 
+
+cat("Estimated phi:", l_phi_hat[[1]], "\n")
+cat("Estimated pi:", l_pi_hat_vec[[1]], "\n")
+cat("All pi > 0?", all(l_pi_hat_vec[[1]] > 0), "\n")
+cat("Sum(pi) = 1?", sum(l_pi_hat_vec[[1]]), "\n")
+
+
+
+
+# Before running Stan, validate inputs:
+if (any(is.na(l_pi_hat_vec[[1]])) || any(l_pi_hat_vec[[1]] <= 0)) {
+  stop("Invalid pi estimates detected")
+}
+
+if (is.na(l_phi_hat[[1]]) || l_phi_hat[[1]] <= 0) {
+  stop("Invalid phi estimate detected")
+}
+
+# Ensure m is reasonable relative to phi
+if (df_sim_settings$m[[1]] >= l_phi_hat[[1]]) {
+  warning("m >= phi may cause numerical issues")
+}
+
 # This function now calculates THREE types of intervals from a single MCMC run:
 # 1. mean_centered: The original simultaneous interval based on max deviation from the mean.
 # 2. marginal: Pointwise (non-simultaneous) intervals using simple quantiles.
@@ -1356,7 +1367,13 @@ fit <- suppressMessages(
     chains = 4,
     iter_warmup = 1250,
     iter_sampling = 2500,
-    refresh = 0
+    refresh = 0,
+    init = function() {
+      list(
+        alpha = rep(1, stan_data$C),  # Start with uniform Dirichlet
+        phi = 2.0                      # Start with modest overdispersion
+      )
+    }
   )
 )
 
@@ -1404,7 +1421,7 @@ df_tot_covprob_long %>%
 filter(total_sim > 300)
 
 
-df_tot_eqt_long %>%
+df_test <- df_tot_eqt_long %>%
   filter(base_method == "bayesian_mcmc_cauchy_scs")
 
 df_tot_eqt_long %>%
@@ -1412,3 +1429,6 @@ df_tot_eqt_long %>%
 
 df_test <- df_asymmetry %>%
   filter(base_method == "bayesian_mcmc_cauchy_scs")
+
+df_test <- df_asymmetry %>%
+  filter(base_method == "scs")

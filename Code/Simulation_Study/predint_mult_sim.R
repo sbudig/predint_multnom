@@ -15,9 +15,10 @@ library(cmdstanr)
 #set working directory
 #setwd(".\\Code_and_Data")
 
-setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
+#setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
+setwd("/home/biostat/Desktop/biostat_group/Budig/Phd/predint_mult/Code_and_Data/")
 # Functions
-source("./Code/predint_mult_source_addbayes.R")
+source("./Code/predint_mult_source.R")
 
 mod_gamma <- cmdstan_model("./Code/dirichlet_multinomial_gamma.stan", compile = TRUE)
 mod_cauchy <- cmdstan_model("./Code/dirichlet_multinomial_cauchy.stan", compile = TRUE)
@@ -127,18 +128,18 @@ l_props <- list(
 # )
 # 
 # # ten categories
-# l_props <- list(
-#   matrix(c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1), ncol = 10, byrow = TRUE),
-#   matrix(c(0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2), ncol = 10, byrow = TRUE),
-#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3), ncol = 10, byrow = TRUE),
-#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.4), ncol = 10, byrow = TRUE),
-#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.5), ncol = 10, byrow = TRUE),
-#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.1, 0.6), ncol = 10, byrow = TRUE),
-#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.35, 0.35), ncol = 10, byrow = TRUE),
-#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
-#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.2, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
-#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.1, 0.2, 0.2, 0.3), ncol = 10, byrow = TRUE)
-# )
+l_props <- list(
+  matrix(c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1), ncol = 10, byrow = TRUE),
+  matrix(c(0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2), ncol = 10, byrow = TRUE),
+  matrix(c(0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3), ncol = 10, byrow = TRUE),
+  matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.4), ncol = 10, byrow = TRUE),
+  matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.5), ncol = 10, byrow = TRUE),
+  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.1, 0.6), ncol = 10, byrow = TRUE),
+  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.35, 0.35), ncol = 10, byrow = TRUE),
+  matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
+  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.2, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
+  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.1, 0.2, 0.2, 0.3), ncol = 10, byrow = TRUE)
+)
 
 # Split up into multiple Iterations to get intermediate results
 #print(paste("Cores", availableCores()))
