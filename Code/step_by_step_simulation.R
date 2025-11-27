@@ -5,7 +5,6 @@
 # =============================================================================
 # SETUP
 # =============================================================================
-
 library(here)
 library(dplyr)
 library(VGAM)
@@ -1367,13 +1366,7 @@ fit <- suppressMessages(
     chains = 4,
     iter_warmup = 1250,
     iter_sampling = 2500,
-    refresh = 0,
-    init = function() {
-      list(
-        alpha = rep(1, stan_data$C),  # Start with uniform Dirichlet
-        phi = 2.0                      # Start with modest overdispersion
-      )
-    }
+    refresh = 0
   )
 )
 
@@ -1384,8 +1377,8 @@ post_pred_samples <- fit$draws("y_pred", format = "matrix")
 pi_mean_centered <- f_construct_simultaneous_pi(post_pred_samples, alpha)
 
 # --- 2. Method 2: Marginal Intervals (Pointwise) ---
-lower_marg <- apply(post_pred_samples, 2, quantile, probs = alpha / 2, na.rm = TRUE)
-upper_marg <- apply(post_pred_samples, 2, quantile, probs = 1 - alpha / 2, na.rm = TRUE)
+lower_marg <- apply(post_pred_samples, 2, quantile, probs = alpha / 2/ncol(X_hist), na.rm = TRUE)
+upper_marg <- apply(post_pred_samples, 2, quantile, probs = 1 - alpha / 2/ncol(X_hist), na.rm = TRUE)
 pi_marginal <- data.frame(lower = lower_marg, upper = upper_marg)
 
 # --- 3. Method 3: SCSrank Simultaneous Interval ---
@@ -1432,3 +1425,48 @@ df_test <- df_asymmetry %>%
 
 df_test <- df_asymmetry %>%
   filter(base_method == "scs")
+
+
+
+f_calc_pi_bayesian_standardized <- function(df_hist, m, alpha, stan_model) {
+  
+  # ... [Setup code remains the same] ...
+  
+  # Fit model and get samples (y_pred is B x C matrix)
+  post_pred_samples <- fit$draws("y_pred", format = "matrix")
+  
+  # 1. Calculate moments of the posterior predictive distribution
+  y_bar_bayes <- colMeans(post_pred_samples)
+  y_sd_bayes  <- apply(post_pred_samples, 2, sd)
+  
+  # Handle zero variance if a category never occurs (prevent div by zero)
+  y_sd_bayes[y_sd_bayes == 0] <- 1e-6 
+  
+  # 2. Calculate STANDARDIZED residuals (Pivotal Quantity) for every sample
+  # (Sample - Mean) / SD
+  # sweep subtracts mean, then sweep divides by SD
+  z_scores <- sweep(post_pred_samples, 2, y_bar_bayes, "-")
+  z_scores <- sweep(z_scores, 2, y_sd_bayes, "/")
+  
+  # 3. Find the maximum absolute standardized deviation for each sample (Simultaneous step)
+  max_abs_z <- apply(abs(z_scores), 1, max)
+  
+  # 4. Find the critical value (1-alpha quantile of the MAX z-scores)
+  q_crit_standardized <- quantile(max_abs_z, probs = 1 - alpha, na.rm = TRUE)
+  
+  # 5. Construct Interval: Mean +/- q * SD
+  lower <- y_bar_bayes - q_crit_standardized * y_sd_bayes
+  upper <- y_bar_bayes + q_crit_standardized * y_sd_bayes
+  
+  # Floor/Ceiling to ensure integer bounds (optional but recommended for counts)
+  lower <- floor(lower)
+  upper <- ceiling(upper)
+  
+  # Ensure non-negative lower bound
+  lower[lower < 0] <- 0
+  
+  return(data.frame(lower, upper))
+}
+
+
+l_pred_int_bayesian_cauchy[[1]]

@@ -83,10 +83,10 @@ df_summary <- list.files(
            .names = "covprob_{.col}"),
     # Calculate equi-tailed property using a regex to match all V# columns
     across(matches("_V\\d+$"), 
-           ~ (n() - sum(. == 1, na.rm = TRUE)+0.5) / n(),
+           ~ (n() - sum(. == 1, na.rm = TRUE)) / n(),
            .names = "{.col}_eqt_u"),
     across(matches("_V\\d+$"), 
-           ~ (n() - sum(. == -1, na.rm = TRUE)+0.5) / n(),
+           ~ (n() - sum(. == -1, na.rm = TRUE)) / n(),
            .names = "{.col}_eqt_l"),
     
     # calculations for the ERROR probabilities
@@ -108,10 +108,6 @@ df_summary <- list.files(
     .groups = "drop" # Drop grouping for subsequent operations
   )
 
-
-  saveRDS(df_summary, file = ".\\Results\\intermediate_Results\\df_summary.rds")
-
-  df_summary <- readRDS(file = ".\\Results\\intermediate_Results\\df_summary.rds")
 # 2. Reshape Data to Tidy (Long) Format ------------------------------------
 
 # Pivot coverage probabilities to long format
@@ -305,6 +301,7 @@ plot_covprob_all <- df_tot_covprob_long %>%
            covprob_type != "coverage_mvn" & 
            covprob_type != "coverage_bonferroni") %>%
   filter(covprob_type != "coverage_bayesian_mcmc_gamma_marg" & covprob_type != "coverage_bayesian_mcmc_cauchy_marg") %>%
+  #filter(covprob_type == "coverage_bayesian_mcmc_cauchy_scs") %>%
   ggplot( aes(x = log10(minpnk), y = covprob))+ 
   geom_point(aes(color = factor(C), shape = factor(n)), size = 2)+
   #facet_grid(phi ~.)+ 
@@ -315,7 +312,7 @@ plot_covprob_all <- df_tot_covprob_long %>%
   geom_hline(yintercept = 0.95-sqrt(0.95*(1-0.95)/1000),linetype="dashed") +
   ylab("Coverage Probability") +
   labs(color ="Probability Vector", shape = "Cluster Size (n)") +
-  theme_bw()+
+  theme_bw(base_size = 18)+
   ylim(0.75, 1)
 
 plot_covprob_all
@@ -685,3 +682,40 @@ ggplot(df_ranks, aes(x = rank, fill = covprob_type)) +
     color = "Method"
   ) +
   theme_bw()
+
+df_tot_eqt_long <- df_tot_eqt_long %>%
+  mutate(asymmetry_ratio = ifelse(eqt_l > 0, eqt_u / eqt_l, NA_real_))
+
+# Create the plot
+asymmetry_plot <- ggplot(df_tot_eqt_long, aes(x = log10(minpnk), y = ifelse(eqt_l > 0, eqt_u / eqt_l, NA_real_)
+)) +
+  geom_point(aes(color = prob, shape = factor(C)), alpha = 0.7) +
+  
+  # Add a horizontal line at y=1 to indicate perfect symmetry
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 1) +
+  
+  # Use a log scale for the y-axis
+  #scale_y_log10(breaks = c(0.25, 0.5, 1, 2, 4)) +
+  
+  # Facet by overdispersion (phi) and the method
+  facet_grid(phi ~ base_method) +
+  
+  # Apply themes and labels
+  #scale_color_viridis_d() +
+  scale_color_gradientn(colors = precise_palette)+
+  labs(
+    #title = "Asymmetry Ratio of Prediction Interval Tail Probabilities",
+    #subtitle = "Ratio = P(y > Upper) / P(y < Lower)",
+    x = expression(paste(log10(min( (m[g]*pi[gc]) )))),
+    y = "Asymmetry Ratio",
+    color = expression(paste("Category Probability (", pi[c], ")"))
+  ) +
+  theme_bw() +
+  theme(
+    #axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+# Display the plot
+print(asymmetry_plot)
+

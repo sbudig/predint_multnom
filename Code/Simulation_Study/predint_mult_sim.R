@@ -7,6 +7,8 @@ library(future.apply)
 #library(MCPAN) # function is called in source
 library(mvtnorm)
 library(cmdstanr)
+library(here)
+
 
 # Run this in your R console
 # install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
@@ -14,14 +16,14 @@ library(cmdstanr)
 
 #set working directory
 #setwd(".\\Code_and_Data")
-
+setwd(here())
 #setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
-setwd("/home/biostat/Desktop/biostat_group/Budig/Phd/predint_mult/Code_and_Data/")
 # Functions
-source("./Code/predint_mult_source.R")
+source(here("Code", "predint_mult_source.R"))
 
-mod_gamma <- cmdstan_model("./Code/dirichlet_multinomial_gamma.stan", compile = TRUE)
-mod_cauchy <- cmdstan_model("./Code/dirichlet_multinomial_cauchy.stan", compile = TRUE)
+mod_gamma <- cmdstan_model(here("Code", "dirichlet_multinomial_gamma.stan"), compile = TRUE)
+mod_cauchy <- cmdstan_model(here("Code", "dirichlet_multinomial_cauchy.stan"), compile = TRUE)
+mod_beta <- cmdstan_model(here("Code", "dirichlet_multinomial_beta_rho.stan"), compile = TRUE)
 
 # Settings ----------------------------------------------------------------
 
@@ -87,8 +89,9 @@ l_methods <- list(
   mvn = TRUE,
   percentile_bt_gemini = TRUE,
   nonparametric_bt = FALSE,  
-  bayesian_mcmc_gamma = TRUE, 
-  bayesian_mcmc_cauchy = TRUE 
+  bayesian_mcmc_gamma = FALSE, 
+  bayesian_mcmc_cauchy = TRUE,
+  bayesian_mcmc_beta = TRUE
 )
 
 # three categories
@@ -104,6 +107,12 @@ l_methods <- list(
 # further three categories
 
 l_props <- list(
+  matrix(c(0.33, 0.33, 0.33), ncol = 3, byrow = TRUE),
+  matrix(c(0.01, 0.01, 0.98), ncol = 3, byrow = TRUE),
+  matrix(c(0.25, 0.01, 0.74), ncol = 3, byrow = TRUE),
+  matrix(c(0.49, 0.02, 0.49), ncol = 3, byrow = TRUE),
+  matrix(c(0.25, 0.25, 0.5), ncol = 3, byrow = TRUE),
+  matrix(c(0.1, 0.3, 0.6), ncol = 3, byrow = TRUE),
   matrix(c(0.02, 0.03, 0.95), ncol = 3, byrow = TRUE),
   matrix(c(0.05, 0.05, 0.9), ncol = 3, byrow = TRUE),
   matrix(c(0.05, 0.1, 0.85), ncol = 3, byrow = TRUE),
@@ -128,18 +137,18 @@ l_props <- list(
 # )
 # 
 # # ten categories
-l_props <- list(
-  matrix(c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1), ncol = 10, byrow = TRUE),
-  matrix(c(0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2), ncol = 10, byrow = TRUE),
-  matrix(c(0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3), ncol = 10, byrow = TRUE),
-  matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.4), ncol = 10, byrow = TRUE),
-  matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.5), ncol = 10, byrow = TRUE),
-  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.1, 0.6), ncol = 10, byrow = TRUE),
-  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.35, 0.35), ncol = 10, byrow = TRUE),
-  matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
-  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.2, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
-  matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.1, 0.2, 0.2, 0.3), ncol = 10, byrow = TRUE)
-)
+# l_props <- list(
+#   matrix(c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1), ncol = 10, byrow = TRUE),
+#   matrix(c(0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2), ncol = 10, byrow = TRUE),
+#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3), ncol = 10, byrow = TRUE),
+#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.1, 0.4), ncol = 10, byrow = TRUE),
+#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.5), ncol = 10, byrow = TRUE),
+#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.1, 0.6), ncol = 10, byrow = TRUE),
+#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.05, 0.05, 0.35, 0.35), ncol = 10, byrow = TRUE),
+#   matrix(c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
+#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.2, 0.2, 0.2, 0.2), ncol = 10, byrow = TRUE),
+#   matrix(c(0.025, 0.025, 0.025, 0.025, 0.05, 0.05, 0.1, 0.2, 0.2, 0.3), ncol = 10, byrow = TRUE)
+# )
 
 # Split up into multiple Iterations to get intermediate results
 #print(paste("Cores", availableCores()))

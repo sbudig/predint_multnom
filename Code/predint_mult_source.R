@@ -1142,24 +1142,37 @@ f_adjust_phi_list <- function(l_phi, m_value) {
 
 
 #  Helper function to construct a simultaneous PI from posterior p --------
-# Helper function to construct a simultaneous PI from posterior predictive samples
-f_construct_simultaneous_pi <- function(post_pred_samples, alpha) {
+f_calc_pi_bayesian_standardized <- function(post_pred_samples, alpha) {
   
-  # Step 1: Calculate the center of the predictive distribution
-  y_hat_bayes <- colMeans(post_pred_samples)
+  # 1. Calculate moments of the posterior predictive distribution
+  y_bar_bayes <- colMeans(post_pred_samples)
+  y_sd_bayes  <- apply(post_pred_samples, 2, sd)
   
-  # Step 2: For each sample, calculate its maximum absolute deviation from the center
-  # This is the "extremeness" score for each simulated vector
-  abs_deviations <- abs(sweep(post_pred_samples, 2, y_hat_bayes, FUN = "-"))
-  max_abs_devs <- apply(abs_deviations, 1, max)
+  # Handle zero variance if a category never occurs (prevent div by zero)
+  y_sd_bayes[y_sd_bayes == 0] <- 1e-6 
   
-  # Step 3: Find the (1-alpha) quantile of these scores
-  # This is the critical value that defines the boundary of our simultaneous region
-  q_crit <- quantile(max_abs_devs, probs = 1 - alpha, na.rm = TRUE)
+  # 2. Calculate STANDARDIZED residuals (Pivotal Quantity) for every sample
+  # (Sample - Mean) / SD
+  # sweep subtracts mean, then sweep divides by SD
+  z_scores <- sweep(post_pred_samples, 2, y_bar_bayes, "-")
+  z_scores <- sweep(z_scores, 2, y_sd_bayes, "/")
   
-  # Step 4: Construct the simultaneous prediction interval
-  lower <- y_hat_bayes - q_crit
-  upper <- y_hat_bayes + q_crit
+  # 3. Find the maximum absolute standardized deviation for each sample (Simultaneous step)
+  max_abs_z <- apply(abs(z_scores), 1, max)
+  
+  # 4. Find the critical value (1-alpha quantile of the MAX z-scores)
+  q_crit_standardized <- quantile(max_abs_z, probs = 1 - alpha, na.rm = TRUE)
+  
+  # 5. Construct Interval: Mean +/- q * SD
+  lower <- y_bar_bayes - q_crit_standardized * y_sd_bayes
+  upper <- y_bar_bayes + q_crit_standardized * y_sd_bayes
+  
+  # Floor/Ceiling to ensure integer bounds (optional but recommended for counts)
+  #lower <- floor(lower)
+  #upper <- ceiling(upper)
+  
+  # Ensure non-negative lower bound
+  lower[lower < 0] <- 0
   
   return(data.frame(lower, upper))
 }
@@ -1210,12 +1223,14 @@ f_calc_pi_bayesian_mcmc <- function(df_hist, m, alpha, stan_model) {
   # Extract posterior predictive samples
   post_pred_samples <- fit$draws("y_pred", format = "matrix")
   
-  # --- 1. Method 1: Mean-Centered Simultaneous Interval (Original) ---
-  pi_mean_centered <- f_construct_simultaneous_pi(post_pred_samples, alpha)
+  # --- 1. Method 1: Standardized (Pivotal) Simultaneous Interval  ---
+  pi_mean_centered <- f_calc_pi_bayesian_standardized(post_pred_samples, alpha)
   
   # --- 2. Method 2: Marginal Intervals (Pointwise) ---
-  lower_marg <- apply(post_pred_samples, 2, quantile, probs = alpha / 2, na.rm = TRUE)
-  upper_marg <- apply(post_pred_samples, 2, quantile, probs = 1 - alpha / 2, na.rm = TRUE)
+  C <- ncol(post_pred_samples)
+  alpha_bonf <- alpha / C
+  lower_marg <- apply(post_pred_samples, 2, quantile, probs = alpha_bonf / 2, na.rm = TRUE)
+  upper_marg <- apply(post_pred_samples, 2, quantile, probs = 1 - alpha_bonf / 2, na.rm = TRUE)
   pi_marginal <- data.frame(lower = lower_marg, upper = upper_marg)
   
   # --- 3. Method 3: SCSrank Simultaneous Interval ---
@@ -1280,7 +1295,7 @@ f_calc_interval_width_stats <- function(df_interval) {
 # Simulation function -----------------------------------------------------
 # Main simulation function
 
-f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_gamma, mod_cauchy){
+f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_gamma, mod_cauchy, mod_beta){
   
   # store original parameter settings dataframe
   df_sim_settings_og <- df_sim_settings
@@ -2532,7 +2547,84 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
     colnames(df_width_stats_bayesian_cauchy_scs) <- paste0("bayesian_mcmc_cauchy_scs_", colnames(df_width_stats_bayesian_cauchy_scs))
     df_sim_res <- cbind(df_sim_res, df_res_bayesian_cauchy_scs, df_cwi_bayesian_cauchy_scs, df_width_stats_bayesian_cauchy_scs)
   }
-  
+
+
+  # Bayesian Hierarchical MCMC Model (Beta Prior on Rho) ---
+  if (l_methods$bayesian_mcmc_beta) {
+    
+       # l_pred_int_bayesian_beta is now a list of lists.
+    l_pred_int_bayesian_beta <- mapply(
+      FUN = f_calc_pi_bayesian_mcmc,
+      df_hist = l_x_k_vec,
+      m = as.list(df_sim_settings$m),
+      alpha = as.list(df_sim_settings$alpha),
+      MoreArgs = list(stan_model = mod_beta),
+      SIMPLIFY = FALSE
+    )
+    
+    # Extract the individual lists of data frames
+    l_pred_int_bayesian_beta_mean <- lapply(l_pred_int_bayesian_beta, `[[`, "mean_centered")
+    l_pred_int_bayesian_beta_marg <- lapply(l_pred_int_bayesian_beta, `[[`, "marginal")
+    l_pred_int_bayesian_beta_scs  <- lapply(l_pred_int_bayesian_beta, `[[`, "scs_rank")
+    
+    # --- 1. Bayesian MCMC beta (Mean Centered) ---
+    l_res_bayesian_beta_mean <- lapply(seq_along(l_pred_int_bayesian_beta_mean), function(i) {
+      if (is.null(l_pred_int_bayesian_beta_mean[[i]])) return(NA)
+      df_counts <- l_y_vec[[i]]
+      df_intervals <- l_pred_int_bayesian_beta_mean[[i]]
+      category_cols <- setdiff(names(df_counts), "level")
+      counts <- as.numeric(df_counts[1, category_cols])
+      if (length(counts) != nrow(df_intervals)) stop(paste("Mismatch at index", i))
+      all(counts >= df_intervals$lower & counts <= df_intervals$upper)
+    })
+    l_cwi_bayesian_beta_mean <- mapply(FUN = f_compare_with_intervals, data = l_y_vec, intervals = l_pred_int_bayesian_beta_mean, SIMPLIFY = FALSE)
+    df_res_bayesian_beta_mean <- as.data.frame(do.call(rbind, l_res_bayesian_beta_mean))
+    colnames(df_res_bayesian_beta_mean) <- "coverage_bayesian_mcmc_beta_mean"
+    df_cwi_bayesian_beta_mean <- as.data.frame(do.call(rbind, l_cwi_bayesian_beta_mean))
+    colnames(df_cwi_bayesian_beta_mean) <- paste0("bayesian_mcmc_beta_mean_", colnames(df_cwi_bayesian_beta_mean))
+    df_width_stats_bayesian_beta_mean <- do.call(rbind, lapply(l_pred_int_bayesian_beta_mean, f_calc_interval_width_stats))
+    colnames(df_width_stats_bayesian_beta_mean) <- paste0("bayesian_mcmc_beta_mean_", colnames(df_width_stats_bayesian_beta_mean))
+    df_sim_res <- cbind(df_sim_res, df_res_bayesian_beta_mean, df_cwi_bayesian_beta_mean, df_width_stats_bayesian_beta_mean)
+    
+    # --- 2. Bayesian MCMC beta (Marginal) ---
+    l_res_bayesian_beta_marg <- lapply(seq_along(l_pred_int_bayesian_beta_marg), function(i) {
+      if (is.null(l_pred_int_bayesian_beta_marg[[i]])) return(NA)
+      df_counts <- l_y_vec[[i]]
+      df_intervals <- l_pred_int_bayesian_beta_marg[[i]]
+      category_cols <- setdiff(names(df_counts), "level")
+      counts <- as.numeric(df_counts[1, category_cols])
+      if (length(counts) != nrow(df_intervals)) stop(paste("Mismatch at index", i))
+      all(counts >= df_intervals$lower & counts <= df_intervals$upper)
+    })
+    l_cwi_bayesian_beta_marg <- mapply(FUN = f_compare_with_intervals, data = l_y_vec, intervals = l_pred_int_bayesian_beta_marg, SIMPLIFY = FALSE)
+    df_res_bayesian_beta_marg <- as.data.frame(do.call(rbind, l_res_bayesian_beta_marg))
+    colnames(df_res_bayesian_beta_marg) <- "coverage_bayesian_mcmc_beta_marg"
+    df_cwi_bayesian_beta_marg <- as.data.frame(do.call(rbind, l_cwi_bayesian_beta_marg))
+    colnames(df_cwi_bayesian_beta_marg) <- paste0("bayesian_mcmc_beta_marg_", colnames(df_cwi_bayesian_beta_marg))
+    df_width_stats_bayesian_beta_marg <- do.call(rbind, lapply(l_pred_int_bayesian_beta_marg, f_calc_interval_width_stats))
+    colnames(df_width_stats_bayesian_beta_marg) <- paste0("bayesian_mcmc_beta_marg_", colnames(df_width_stats_bayesian_beta_marg))
+    df_sim_res <- cbind(df_sim_res, df_res_bayesian_beta_marg, df_cwi_bayesian_beta_marg, df_width_stats_bayesian_beta_marg)
+    
+    # --- 3. Bayesian MCMC beta (SCS Rank) ---
+    l_res_bayesian_beta_scs <- lapply(seq_along(l_pred_int_bayesian_beta_scs), function(i) {
+      if (is.null(l_pred_int_bayesian_beta_scs[[i]])) return(NA)
+      df_counts <- l_y_vec[[i]]
+      df_intervals <- l_pred_int_bayesian_beta_scs[[i]]
+      category_cols <- setdiff(names(df_counts), "level")
+      counts <- as.numeric(df_counts[1, category_cols])
+      if (length(counts) != nrow(df_intervals)) stop(paste("Mismatch at index", i))
+      all(counts >= df_intervals$lower & counts <= df_intervals$upper)
+    })
+    l_cwi_bayesian_beta_scs <- mapply(FUN = f_compare_with_intervals, data = l_y_vec, intervals = l_pred_int_bayesian_beta_scs, SIMPLIFY = FALSE)
+    df_res_bayesian_beta_scs <- as.data.frame(do.call(rbind, l_res_bayesian_beta_scs))
+    colnames(df_res_bayesian_beta_scs) <- "coverage_bayesian_mcmc_beta_scs"
+    df_cwi_bayesian_beta_scs <- as.data.frame(do.call(rbind, l_cwi_bayesian_beta_scs))
+    colnames(df_cwi_bayesian_beta_scs) <- paste0("bayesian_mcmc_beta_scs_", colnames(df_cwi_bayesian_beta_scs))
+    df_width_stats_bayesian_beta_scs <- do.call(rbind, lapply(l_pred_int_bayesian_beta_scs, f_calc_interval_width_stats))
+    colnames(df_width_stats_bayesian_beta_scs) <- paste0("bayesian_mcmc_beta_scs_", colnames(df_width_stats_bayesian_beta_scs))
+    df_sim_res <- cbind(df_sim_res, df_res_bayesian_beta_scs, df_cwi_bayesian_beta_scs, df_width_stats_bayesian_beta_scs)
+  }
+
   return(df_sim_res)
   
 }
@@ -2581,6 +2673,7 @@ f_global_sim <- function(m_true_pi_vec, df_sim_settings, l_methods) {
                                      l_methods = l_methods, 
                                      mod_gamma = mod_gamma,
                                      mod_cauchy = mod_cauchy, 
+                                     mod_beta = mod_beta,
                                      future.seed = TRUE)
         
         # 2. If future_lapply is successful, combine the results. This breaks the while-loop.
@@ -2620,7 +2713,9 @@ f_global_sim <- function(m_true_pi_vec, df_sim_settings, l_methods) {
                      df_sim_settings, 
                      l_methods, 
                      mod_gamma,
-                     mod_cauchy))
+                     mod_cauchy,
+                     mod_beta
+                    ))
   }
   
   print("dfdone")
