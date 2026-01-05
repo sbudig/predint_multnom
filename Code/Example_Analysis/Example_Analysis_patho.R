@@ -7,6 +7,7 @@ library(mvtnorm)
 library(cmdstanr)
 library(forcats)
 library(xtable)
+library(here)
 
 # Functions ---------------------------------------------------------------
 
@@ -923,15 +924,50 @@ f_calc_zc_main <- function(l_y_star, l_y_star_hat, l_se, n_cat) {
   
 }
 
-# Calculate Bayesian PI using a Hierarchical MCMC model -------------------
+#  Helper function to construct a simultaneous PI from posterior p --------
+f_calc_pi_bayesian_standardized <- function(post_pred_samples, alpha) {
+  
+  # 1. Calculate moments of the posterior predictive distribution
+  y_bar_bayes <- colMeans(post_pred_samples)
+  y_sd_bayes  <- apply(post_pred_samples, 2, sd)
+  
+  # Handle zero variance if a category never occurs (prevent div by zero)
+  y_sd_bayes[y_sd_bayes == 0] <- 1e-6 
+  
+  # 2. Calculate STANDARDIZED residuals (Pivotal Quantity) for every sample
+  # (Sample - Mean) / SD
+  # sweep subtracts mean, then sweep divides by SD
+  z_scores <- sweep(post_pred_samples, 2, y_bar_bayes, "-")
+  z_scores <- sweep(z_scores, 2, y_sd_bayes, "/")
+  
+  # 3. Find the maximum absolute standardized deviation for each sample (Simultaneous step)
+  max_abs_z <- apply(abs(z_scores), 1, max)
+  
+  # 4. Find the critical value (1-alpha quantile of the MAX z-scores)
+  q_crit_standardized <- quantile(max_abs_z, probs = 1 - alpha, na.rm = TRUE)
+  
+  # 5. Construct Interval: Mean +/- q * SD
+  lower <- y_bar_bayes - q_crit_standardized * y_sd_bayes
+  upper <- y_bar_bayes + q_crit_standardized * y_sd_bayes
+  
+  # Floor/Ceiling to ensure integer bounds (optional but recommended for counts)
+  #lower <- floor(lower)
+  #upper <- ceiling(upper)
+  
+  # Ensure non-negative lower bound
+  lower[lower < 0] <- 0
+  
+  return(data.frame(lower, upper))
+}
 
-# This properly accounts for overdispersion.
+# Calculate Bayesian PI using a Hierarchical MCMC model -------------------
 #
-# @param df_hist The data frame of historical counts.
-# @param m The cluster size of the future observation.
-# @param alpha The significance level for the (1-alpha) prediction interval.
-# @param stan_model A pre-compiled Stan model object.
-# @return A data frame containing the lower and upper bounds of the prediction interval.
+# This function now calculates THREE types of intervals from a single MCMC run:
+# 1. mean_centered: The original simultaneous interval based on max deviation from the mean.
+# 2. marginal: Pointwise (non-simultaneous) intervals using simple quantiles.
+# 3. scs_rank: A simultaneous interval using the SCSrank method on the posterior samples.
+#
+# @return A list containing three data frames: $mean_centered, $marginal, $scs_rank
 
 f_calc_pi_bayesian_mcmc <- function(df_hist, m, alpha, stan_model) {
   
@@ -943,7 +979,7 @@ f_calc_pi_bayesian_mcmc <- function(df_hist, m, alpha, stan_model) {
   # Prepare data for Stan
   category_cols <- grep("^V", names(df_hist))
   if (length(category_cols) == 0) {
-    category_cols <- 1:ncol(df_hist)
+    category_cols <- 1:(ncol(df_hist))
   }
   X_hist <- as.matrix(df_hist[, category_cols, drop = FALSE])
   
@@ -956,7 +992,6 @@ f_calc_pi_bayesian_mcmc <- function(df_hist, m, alpha, stan_model) {
   )
   
   # Fit the model using MCMC
-  # refresh = 0 suppresses printing fitting progress for cleaner simulation output
   fit <- suppressMessages(
     stan_model$sample(
       data = stan_data,
@@ -969,24 +1004,43 @@ f_calc_pi_bayesian_mcmc <- function(df_hist, m, alpha, stan_model) {
   )
   
   # Extract posterior predictive samples
-  # The 'y_pred' variable is defined in the "generated quantities" block of the Stan model
   post_pred_samples <- fit$draws("y_pred", format = "matrix")
   
-  # Construct marginal prediction intervals
-  # Note: This still produces marginal intervals. A more advanced method would be needed
-  # for guaranteed simultaneous coverage, but this corrects the primary model failure.
-  # lower <- apply(post_pred_samples, 2, quantile, probs = alpha / 2, na.rm = TRUE)
-  # upper <- apply(post_pred_samples, 2, quantile, probs = 1 - alpha / 2, na.rm = TRUE)
+  # --- 1. Method 1: Standardized (Pivotal) Simultaneous Interval  ---
+  pi_mean_centered <- f_calc_pi_bayesian_standardized(post_pred_samples, alpha)
   
-  # Construct a simultaneous prediction interval using the new method
-  # instead of taking marginal quantiles.
-  pred_interval <- f_construct_simultaneous_pi(post_pred_samples, alpha)
+  # --- 2. Method 2: Marginal Intervals (Pointwise) ---
+  C <- ncol(post_pred_samples)
+  alpha_bonf <- alpha / C
+  lower_marg <- apply(post_pred_samples, 2, quantile, probs = alpha_bonf / 2, na.rm = TRUE)
+  upper_marg <- apply(post_pred_samples, 2, quantile, probs = 1 - alpha_bonf / 2, na.rm = TRUE)
+  pi_marginal <- data.frame(lower = lower_marg, upper = upper_marg)
   
-  # Clean up Stan files that are created during the run
-  # This is important for not cluttering the directory during a large simulation
+  # --- 3. Method 3: SCSrank Simultaneous Interval ---
+  pi_scs_rank <- tryCatch({
+    # Use conf.level = 1 - alpha
+    conf_matrix <- SCSrank(post_pred_samples, conf.level = 1 - alpha)$conf.int
+    # convert matrix to data.frame
+    as.data.frame(conf_matrix)
+  }, error = function(e) {
+    # Return an NA-filled data frame if SCSrank fails
+    warning(paste("SCSrank failed on posterior samples:", e$message))
+    data.frame(lower = rep(NA, ncol(post_pred_samples)),
+               upper = rep(NA, ncol(post_pred_samples)))
+  })
+  # Ensure column names match the other data frames
+  colnames(pi_scs_rank) <- c("lower", "upper")
+  
+  
+  # Clean up Stan files
   suppressWarnings(file.remove(fit$output_files()))
   
-  return(pred_interval)
+  # Return all three intervals in a named list
+  return(list(
+    mean_centered = pi_mean_centered,
+    marginal = pi_marginal,
+    scs_rank = pi_scs_rank
+  ))
 }
 
 #  Helper function to construct a simultaneous PI from posterior p --------
@@ -1014,14 +1068,16 @@ f_construct_simultaneous_pi <- function(post_pred_samples, alpha) {
 
 # Data --------------------------------------------------------------------
 
-set.seed(24)
-# 
+#set.seed(1577)
+set.seed(206       )
+
+
 df_pat <- data.frame(Minimal = c(15,18,6,4,7),
                      Slight = c(22,20,19,18,25),
                      Moderate = c(8,5,17,22,9),
                      Severe = c(1,0,4,2,0),
-                     Massive = c(0,0,0,0,1),
-                     Trial = c("Historical", "Historical", "Historical", "Historical", "Current"))
+                     Massive = c(0,0,0,0,1)
+                     )
 
 fit_pat <- vglm(
   formula = cbind(Slight, Moderate, Severe, Massive, Minimal) ~ 1,
@@ -1032,6 +1088,8 @@ fit_pat <- vglm(
 
 v_pi_hat <- f_calc_pi(fit_pat)
 phi_hat <- f_estimate_phi(model = fit_pat, dispersion = "afroz")
+
+
 
 xy_vec <- f_rdirmultinom(
   phi = phi_hat,
@@ -1048,7 +1106,7 @@ df_pat <- as.data.frame(xy_vec) %>%
     Severe = V4,
     Massive = V5
   ) %>%
-  mutate(Trial = c("Current", rep("Historical", times = 10)))
+  mutate(Trial = c( rep("Historical", times = 10), "Current"))
 # 
 # write.csv(df_pat, ".\\Code\\Example_Analysis\\df_pat.csv", row.names = FALSE)
 
@@ -1090,10 +1148,10 @@ plot_pat_trial <- df_pat_long %>%
 
 plot_pat_trial
 
-ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\Code_and_Data\\Figures\\plot_pat_trial.png",
-       plot = plot_pat_trial,
-       width = 12, height = 8,
-       dpi = 900)
+# ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\Code_and_Data\\Figures\\plot_pat_trial.png",
+#        plot = plot_pat_trial,
+#        width = 12, height = 8,
+#        dpi = 900)
 
 
 # ggplot(df_pat_long, aes(x = Categories, y = value)) +
@@ -1480,20 +1538,21 @@ pred_int_stud
 
 # Bayesian Hierarchical Model ---------------------------------------------
 
-## Gamma Prior ------------------------------------------------------------
-mod_gamma <- cmdstan_model("./Code/dirichlet_multinomial_gamma.stan", 
-                           compile = TRUE)
+## Beta Prior -------------------------------------------------------------
+mod_beta <- cmdstan_model(here("Code", "dirichlet_multinomial_beta_rho.stan"), compile = TRUE)
 
-pred_int_bayesian_gamma <- f_calc_pi_bayesian_mcmc(
+pred_int_bayesian_beta <- f_calc_pi_bayesian_mcmc(
   df_hist = dat_pat_hist[, 1:5],
   m = m,
   alpha = alpha,
-  stan_model = mod_gamma)
+  stan_model = mod_beta)
 
-pred_int_bayesian_gamma
+pred_int_bayesian_beta_mean <- pred_int_bayesian_beta$mean_centered
+pred_int_bayesian_beta_marg <- pred_int_bayesian_beta$marginal
+pred_int_bayesian_beta_scs <- pred_int_bayesian_beta$scs_rank
 
 ## Half Cauchy Prior ------------------------------------------------------
-mod_cauchy <- cmdstan_model("./Code/dirichlet_multinomial_cauchy.stan", 
+mod_cauchy <- cmdstan_model(here("Code", "dirichlet_multinomial_cauchy.stan"), 
                             compile = TRUE)
 
 pred_int_bayesian_cauchy <- f_calc_pi_bayesian_mcmc(
@@ -1502,9 +1561,9 @@ pred_int_bayesian_cauchy <- f_calc_pi_bayesian_mcmc(
   alpha = alpha,
   stan_model = mod_cauchy)
 
-pred_int_bayesian_cauchy
-
-
+pred_int_bayesian_cauchy_mean <- pred_int_bayesian_cauchy$mean_centered
+pred_int_bayesian_cauchy_marg <- pred_int_bayesian_cauchy$marginal
+pred_int_bayesian_cauchy_scs <- pred_int_bayesian_cauchy$scs_rank
 
 # Result Table ------------------------------------------------------------
 
@@ -1515,13 +1574,18 @@ category_order <- c("Minimal", "Slight", "Moderate", "Severe", "Massive")
 trial_order    <- c("Historical", "Current")
 
 # Observed/Predicted data for plotting
-y_c_vec <- c(3, 20, 22, 0, 1) # Observed counts from dat_pat_curr
+y_c_vec <- unlist(as.vector(dat_pat_curr[1:5]))
 
 # Methods to include in the main plot
 chosen_methods <- c(
-  "Bisec (Sym)", "Bisec (Asym)", "Bisec (Bonf)", 
-  "SCS Rank", "Studentized BS", "Bayes (Cauchy)"
+  "Sym. Calibration", "Asym. Calibration", "Marg. Calibration",
+  "Rank-Based SCS", "Max. Abs. Res.", "B: Cauchy (SCS)"
 )
+
+# chosen_methods <- c(
+#   "Pointwise", "Bonferroni", "Sym. Calibration", "Asym. Calibration", "Marg. Calibration", 
+#   "Rank-Based SCS", "Max. Abs. Res.", "B: Cauchy (SCS)"
+# )
 
 # Plotting aesthetics
 dodge_width <- 0.6
@@ -1532,17 +1596,21 @@ dodge_width <- 0.6
 # Create a single named list of all interval data frames
 all_intervals <- list(
   `Pointwise` = pred_int_pointwise,
-  `MVN Approx` = pred_int_mvn,
+  `MVN` = pred_int_mvn,
   `Bonferroni` = pred_int_bonf,
-  `Bisec (Sym)` = pred_int_bisection_sym,
-  `Bisec (Asym)` = pred_int_bisection_asym,
-  `Bisec (Bonf)` = pred_int_bonf_bisec,
-  `SCS Rank` = pred_int_scsrank,
-  `Studentized BS` = pred_int_stud,
-  `Bayes (Gamma)` = pred_int_bayesian_gamma,
-  `Bayes (Cauchy)` = pred_int_bayesian_cauchy
-)
+  `Sym. Calibration` = pred_int_bisection_sym,
+  `Asym. Calibration` = pred_int_bisection_asym,
+  `Marg. Calibration` = pred_int_bonf_bisec,
+  `Rank-Based SCS` = pred_int_scsrank,
+  `Max. Abs. Res.` = pred_int_stud,
+  `B: Beta (mean)` = pred_int_bayesian_beta_mean,
+  `B: Beta (marg)` = pred_int_bayesian_beta_marg,
+  `B: Beta (SCS)` = pred_int_bayesian_beta_scs,
+  `B: Cauchy (mean)` = pred_int_bayesian_cauchy_mean,
+  `B: Cauchy (marg)` = pred_int_bayesian_cauchy_marg,
+  `B: Cauchy (SCS)` = pred_int_bayesian_cauchy_scs
 
+)
 
 # 5. OUTPUT 1: LaTeX Table (for Supplementary Material)
 # -------------------------------------------------------------------
@@ -1565,7 +1633,7 @@ if (is.null(cat_names)) {
 # Add category names and predicted means
 comparison_table <- data.frame(
   Category = cat_names,
-  y_hat = y_hat_vec, # Using 'y_hat_vec' from assumptions
+  y = y_c_vec, # Using 'y_hat_vec' from assumptions
   comparison_table
 )
 
@@ -1573,7 +1641,7 @@ comparison_table <- data.frame(
 xtable_obj <- xtable(comparison_table,
                      caption = "Comparison of Simultaneous Prediction Intervals by Method",
                      label = "tab:pi_comparison",
-                     align = c("c", "l", "r", rep("c", 10)) # l(eft), r(ight), c(enter)
+                     align = c("c", "l", "r", rep("c", 14)) # l(eft), r(ight), c(enter)
 )
 
 # Print LaTeX code to console
@@ -1650,7 +1718,7 @@ plot_combined_clean <- ggplot() +
       ymax = Upper,
       color = Method
     ),
-    width = 0.3,
+    width = 0.4,
     linewidth = 1.1,
     position = position_dodge(width = dodge_width)
   ) +
@@ -1677,12 +1745,14 @@ plot_combined_clean <- ggplot() +
   ) +
   
   # Layer 5: Facets, Theme, and Labels
-  facet_grid(
+facet_grid(
     ~Trial,
     scales = "free_x",
-    space = "free_x"
+    space = "free_x",
+    labeller = as_labeller(c("Historical" = "Historical Control Data", 
+                             "Current" = "Current Trial"))
   ) +
-  theme_bw(base_size = 18) +
+  theme_bw(base_size = 10) +
   labs(
     y = "Count",
     x = "Category",
@@ -1691,15 +1761,20 @@ plot_combined_clean <- ggplot() +
   ) +
   theme(
     legend.position = "bottom",
-    legend.box = "vertical",
-    strip.text = element_text(face = "bold", size = 16)
+    legend.box = "vertical"
   ) +
-  scale_shape_manual(values = 1:10) # Ensure all 10 shapes are used
+  scale_shape_manual(values = 1:10) +
+  guides(shape = "none")
 
 
-# 7. DISPLAY THE MAIN PLOT
-# -------------------------------------------------------------------
 print(plot_combined_clean)
+
+ggsave(here("Figures", "plot_pat_trial.png"),
+       plot = plot_combined_clean,
+       width = 7,       # Full text width
+       height = 5,      # Max text height
+       units = "in",
+       dpi = 900)     
 
 # Alternative 1 -----------------------------------------------------------
 

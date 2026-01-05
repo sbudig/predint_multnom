@@ -95,7 +95,7 @@ l_methods <- list(
 )
 
 # three categories
-# l_props <- list(
+#l_props <- list(
 #   matrix(c(0.33, 0.33, 0.33), ncol = 3, byrow = TRUE),
 #   matrix(c(0.01, 0.01, 0.98), ncol = 3, byrow = TRUE),
 #   matrix(c(0.25, 0.01, 0.74), ncol = 3, byrow = TRUE),
@@ -124,7 +124,7 @@ l_props <- list(
 
 # # Five categories
 # l_props <- list(
-#  #matrix(c(0.20, 0.20, 0.20, 0.20, 0.20), ncol = 5, byrow = TRUE),
+#   matrix(c(0.20, 0.20, 0.20, 0.20, 0.20), ncol = 5, byrow = TRUE),
 #   matrix(c(0.30, 0.30, 0.20, 0.10, 0.10), ncol = 5, byrow = TRUE),
 #   matrix(c(0.44, 0.22, 0.11, 0.11, 0.11), ncol = 5, byrow = TRUE),
 #   matrix(c(0.50, 0.30, 0.10, 0.05, 0.05), ncol = 5, byrow = TRUE),

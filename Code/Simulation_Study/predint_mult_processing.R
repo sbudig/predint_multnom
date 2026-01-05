@@ -3,11 +3,14 @@ library(patchwork)
 library(viridis)
 library(RColorBrewer)
 library(here)
+library(ggsci)
+library(wesanderson)
 
 setwd(here())
 #setwd(r"(B:\Budig\Phd\predint_mult\Code_and_Data)")
 #setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
 #setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
+setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Manuskript\Raw\Code_and_Data)")
 # Explanation of variables ------------------------------------------------
 
 # This script processes simulation results from .rds files. It calculates coverage
@@ -45,7 +48,7 @@ COVERAGE_METHODS <- c(
   "coverage_bisection_asym", "coverage_bonf_bisec", "coverage_mvn",
   "coverage_percentile_bt1", "coverage_percentile_bt_gemini",
   "coverage_bayesian_mcmc_cauchy_mean", "coverage_bayesian_mcmc_cauchy_marg", "coverage_bayesian_mcmc_cauchy_scs",
-  "coverage_bayesian_mcmc_gamma_mean", "coverage_bayesian_mcmc_gamma_marg","coverage_bayesian_mcmc_gamma_scs"
+  "coverage_bayesian_mcmc_beta_mean", "coverage_bayesian_mcmc_beta_marg","coverage_bayesian_mcmc_beta_scs"
 )
 
 
@@ -254,26 +257,39 @@ unique(simulations_per_prob$total_simulations)
 
 
 # Plots -------------------------------------------------------------------
+# Define Standard Plotting Parameters
+my_base_size <- 10 # font size
 
+# Colors
+
+# Define the Okabe-Ito Palette (Colorblind Safe)
+# Order: Orange, Sky Blue, Bluish Green, Yellow, Blue, Vermillion, Reddish Purple, Grey
+oi_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+
+# Define specific mappings to ensure consistency across plots
+# Map Categories (C) to specific colors (Plot 1)
+# Using 3 distinct colors from the palette
+cols_categories <- c("3" = oi_palette[2],  # Sky Blue
+                     "5" = oi_palette[1],  # Orange
+                     "10" = oi_palette[6]) # Vermillion
 
 ## Coverage Probability ---------------------------------------------------
 
 new_covprob_labels <- c(
-  "coverage_pointwise" = "Pointwise Norm. Approx.",
-  "coverage_bonferroni" = "Bonferroni Adjustment",
-  "coverage_bisection" = "Symmetrical Bisection",
-  "coverage_bisection_asym" = "Asymmetrical Bisection",
-  "coverage_bonf_bisec" = "Bonferroni Bisection",
-  "coverage_mvn" = "Multivariate Norm. Approx.",
-  "coverage_percentile_bt1" = "SCS Method",
-  "coverage_percentile_bt_gemini" = "Max. Abs. Residual",
-  "coverage_bayesian_mcmc_cauchy_mean" = "Bayes: Cauchy (mean)", 
-  "coverage_bayesian_mcmc_cauchy_marg" = "Bayes: Cauchy (marg)", 
-  "coverage_bayesian_mcmc_cauchy_scs" = "Bayes: Cauchy (scs)",
-  "coverage_bayesian_mcmc_gamma_mean" = "Bayes: Gamma (mean)", 
-  "coverage_bayesian_mcmc_gamma_marg" = "Bayes: Gamma (marg)",
-  "coverage_bayesian_mcmc_gamma_scs" = "Bayes: Gamma (scs)"
-  
+  "coverage_pointwise" = "Pointwise",
+  "coverage_bonferroni" = "Bonferroni",
+  "coverage_bisection" = "Sym. Calibration",
+  "coverage_bisection_asym" = "Asym. Calibration",
+  "coverage_bonf_bisec" = "Marg. Calibration",
+  "coverage_mvn" = "MVN",
+  "coverage_percentile_bt1" = "Rank-Based SCS",
+  "coverage_percentile_bt_gemini" = "Max. Abs. Res.",
+  "coverage_bayesian_mcmc_cauchy_mean" = "B: Cauchy (mean)", 
+  "coverage_bayesian_mcmc_cauchy_marg" = "B: Cauchy (marg)", 
+  "coverage_bayesian_mcmc_cauchy_scs" = "B: Cauchy (SCS)",
+  "coverage_bayesian_mcmc_beta_mean" = "B: Beta (mean)", 
+  "coverage_bayesian_mcmc_beta_marg" = "B: Beta (marg)",
+  "coverage_bayesian_mcmc_beta_scs" = "B: Beta (SCS)"
 )
 
 df_tot_covprob_long <- df_tot_covprob_long %>% 
@@ -284,32 +300,37 @@ df_tot_covprob_long <- df_tot_covprob_long %>%
                                     "coverage_bisection",
                                     "coverage_bisection_asym",
                                     "coverage_bonf_bisec",
-                                    "coverage_percentile_bt1",
                                     "coverage_percentile_bt_gemini",
+                                    "coverage_percentile_bt1",
                                     "coverage_bayesian_mcmc_cauchy_mean", 
                                     "coverage_bayesian_mcmc_cauchy_marg", 
                                     "coverage_bayesian_mcmc_cauchy_scs",
-                                    "coverage_bayesian_mcmc_gamma_mean", 
-                                    "coverage_bayesian_mcmc_gamma_marg",
-                                    "coverage_bayesian_mcmc_gamma_scs"))
+                                    "coverage_bayesian_mcmc_beta_mean", 
+                                    "coverage_bayesian_mcmc_beta_marg",
+                                    "coverage_bayesian_mcmc_beta_scs"))
 
 ### Kompletter Plot -------------------------------------------------------
+df_tot_covprob_long <- df_tot_covprob_long %>%
+  mutate(rho = (phi - 1) / (n - 1),
+    sum_rho = ifelse(rho <= 0.1, 0.1, rho))
+unique(df_tot_covprob_long$sum_rho)
 
 plot_covprob_all <- df_tot_covprob_long %>% 
-  filter(total_sim > 300) %>%
+  #filter(total_sim > 300) %>%
   filter(covprob_type != "coverage_pointwise" & 
            covprob_type != "coverage_mvn" & 
            covprob_type != "coverage_bonferroni") %>%
-  filter(covprob_type != "coverage_bayesian_mcmc_gamma_marg" & covprob_type != "coverage_bayesian_mcmc_cauchy_marg") %>%
+  filter(C < 10) %>%
+  #filter(covprob_type != "coverage_bayesian_mcmc_gamma_marg" & covprob_type != "coverage_bayesian_mcmc_cauchy_marg") %>%
   #filter(covprob_type == "coverage_bayesian_mcmc_cauchy_scs") %>%
   ggplot( aes(x = log10(minpnk), y = covprob))+ 
-  geom_point(aes(color = factor(C), shape = factor(n)), size = 2)+
+  geom_point(aes(color = sum_rho, shape = factor(n)), size = 2)+
   #facet_grid(phi ~.)+ 
   facet_grid(phi ~ covprob_type, labeller = labeller(covprob_type = new_covprob_labels))+ 
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ 
   geom_hline(yintercept = 0.95) +
-  geom_hline(yintercept = 0.95+sqrt(0.95*(1-0.95)/1000),linetype="dashed") +
-  geom_hline(yintercept = 0.95-sqrt(0.95*(1-0.95)/1000),linetype="dashed") +
+  geom_hline(yintercept = 0.95+sqrt(0.95*(1-0.95)/500),linetype="dashed") +
+  geom_hline(yintercept = 0.95-sqrt(0.95*(1-0.95)/500),linetype="dashed") +
   ylab("Coverage Probability") +
   labs(color ="Probability Vector", shape = "Cluster Size (n)") +
   theme_bw(base_size = 18)+
@@ -327,7 +348,7 @@ plot_covprob_top <- df_tot_covprob_long %>%
   filter(covprob_type %in% facet_levels[1:5]) %>%
   arrange(desc(C)) %>%
   ggplot(aes(x = log10(minpnk), y = covprob)) +
-  geom_point(aes(color = factor(C), shape = factor(n)), size = 2, alpha = 0.7) +
+  geom_point(aes(color = factor(C), shape = factor(n)), size = 1.25, alpha = 1) +
   facet_grid(phi ~ covprob_type, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
                                                      covprob_type = new_covprob_labels)) +
   geom_hline(yintercept = 0.95) +
@@ -338,17 +359,20 @@ plot_covprob_top <- df_tot_covprob_long %>%
   #labs(colour =  expression(paste("Probability Vector ",(bold("\u03C0")[true]))), shape = "Cluster Size (n)")  +
   labs(colour = "No. of categories (C)", shape = "Cluster Size (n)")  +
   xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
-  theme_bw() +
+  theme_bw(base_size = my_base_size) +
   theme(axis.text.x = element_blank(),
         axis.title.x = element_blank())+
-  scale_color_viridis(discrete=TRUE)
+  #scale_color_viridis(discrete=TRUE,direction = -1, begin = 0.2)
+  #scale_color_brewer(palette = "Dark2", name = "No. of categories (C)")
+  scale_color_manual(values = cols_categories, name = "No. of categories (C)") 
+  #scale_color_npg(name = "No. of categories (C)")
 
 # --- Plot 2: Remaining 5 facets ---
 plot_covprob_bottom <- df_tot_covprob_long %>%
-  filter(covprob_type %in% facet_levels[c(6,7,8,10,11)]) %>% 
+  filter(covprob_type %in% facet_levels[c(6,7,8,11,14)]) %>% 
   arrange(desc(C)) %>%
   ggplot(aes(x = log10(minpnk), y = covprob)) +
-  geom_point(aes(color = factor(C), shape = factor(n)), size = 2, alpha = 0.7) +
+  geom_point(aes(color = factor(C), shape = factor(n)), size = 1.25, alpha = 1) +
   facet_grid(phi ~ covprob_type, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
                                                      covprob_type = new_covprob_labels)) +
   geom_hline(yintercept = 0.95) +
@@ -359,23 +383,27 @@ plot_covprob_bottom <- df_tot_covprob_long %>%
   #labs(colour =  expression(paste("Probability Vector ",(bold("\u03C0")[true]))), shape = "Cluster Size (n)")   +
   labs(colour = "No. of categories (C)", shape = "Cluster Size (n)")   +
   xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
-  theme_bw() +
-  scale_color_viridis(discrete=TRUE)
+  theme_bw(base_size = my_base_size) +
+  #scale_color_viridis(discrete=TRUE, direction = -1, begin = 0.2)
+  #scale_color_brewer(palette = "Dark2", name = "No. of categories (C)")
+  scale_color_manual(values = cols_categories, name = "No. of categories (C)") 
+#scale_color_npg(name = "No. of categories (C)")
 
 # The / operator stacks plots vertically
 # plot_layout ensures a single, shared legend
-plot_covprob_all_split <- plot_covprob_top / plot_covprob_bottom + plot_layout(guides = "collect") & 
+plot_covprob_all_split <- plot_covprob_top / plot_covprob_bottom + 
+  plot_layout(guides = "collect") & 
   theme(legend.position = "bottom")
+
 plot_covprob_all_split
 
-
-# Save the final combined plot
-ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\Code_and_Data\\Figures\\plot_covprob_all.png",
+# --- Save ---
+ggsave("./Figures/plot_covprob_all.png",
        plot = plot_covprob_all_split,
-       width = 10, height = 12,
-       dpi = 900)
-
-
+       width = 7,       # Full text width
+       height = 9,      # Max text height
+       units = "in",
+       dpi = 900)      
 
 
 
@@ -383,37 +411,20 @@ ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\
 pattern <- "bisection|bisec|percentile|bayesian_mcmc_cauchy_scs"
 
 new_eqt_labels <- c(
-  "pointwise" = "Pointwise Norm. Approx.",
-  "bonferroni" = "Bonferroni Adjustment",
-  "bisection" = "Symmetrical Bisection",
-  "bisection_asym" = "Asymmetrical Bisection",
-  "bonf_bisec" = "Bonferroni Bisection",
-  "mvn" = "Multivariate Norm. Approx.",
-  "percentile_bt1" = "SCS Method",
-  "percentile_bt_gemini" = "Max. Abs. Residual",
-  "nonparametric_bt" = "Nonpar. Bootstrap",
-  "bayesian_mcmc_cauchy" = "Bayesian: Cauchy",
-  "bayesian_mcmc_gamma" = "Bayesian: Gamma"
-  
-)
-
-
-new_eqt_labels <- c(
-  "coverage_pointwise" = "Pointwise Norm. Approx.",
-  "coverage_bonferroni" = "Bonferroni Adjustment",
-  "coverage_bisection" = "Symmetrical Bisection",
-  "coverage_bisection_asym" = "Asymmetrical Bisection",
-  "coverage_bonf_bisec" = "Bonferroni Bisection",
-  "coverage_mvn" = "Multivariate Norm. Approx.",
-  "coverage_percentile_bt1" = "SCS Method",
-  "coverage_percentile_bt_gemini" = "Max. Abs. Residual",
-  "coverage_bayesian_mcmc_cauchy_mean" = "Bayes: Cauchy (mean)", 
-  "coverage_bayesian_mcmc_cauchy_marg" = "Bayes: Cauchy (marg)", 
-  "coverage_bayesian_mcmc_cauchy_scs" = "Bayes: Cauchy (scs)",
-  "coverage_bayesian_mcmc_gamma_mean" = "Bayes: Gamma (mean)", 
-  "coverage_bayesian_mcmc_gamma_marg" = "Bayes: Gamma (marg)",
-  "coverage_bayesian_mcmc_gamma_scs" = "Bayes: Gamma (scs)"
-  
+  "pointwise" = "Pointwise",
+  "bonferroni" = "Bonferroni",
+  "bisection" = "Sym. Calibration",
+  "bisection_asym" = "Asym. Calibration",
+  "bonf_bisec" = "Marg. Calibration",
+  "mvn" = "MVN",
+  "percentile_bt_gemini" = "Max. Abs. Res.",
+  "percentile_bt1" = "Rank-Based SCS",
+  "bayesian_mcmc_cauchy_mean" = "B: Cauchy (mean)", 
+  "bayesian_mcmc_cauchy_marg" = "B: Cauchy (marg)", 
+  "bayesian_mcmc_cauchy_scs" = "B: Cauchy (SCS)",
+  "bayesian_mcmc_beta_mean" = "B: Beta (mean)", 
+  "bayesian_mcmc_beta_marg" = "B: Beta (marg)",
+  "bayesian_mcmc_beta_scs" = "B: Beta (SCS)"
 )
 
 df_tot_eqt_long <- df_tot_eqt_long %>% 
@@ -429,9 +440,12 @@ df_tot_eqt_long <- df_tot_eqt_long %>%
                                     "bayesian_mcmc_cauchy_mean", 
                                     "bayesian_mcmc_cauchy_marg", 
                                     "bayesian_mcmc_cauchy_scs",
-                                    "bayesian_mcmc_gamma_mean", 
-                                    "bayesian_mcmc_gamma_marg",
-                                    "bayesian_mcmc_gamma_scs"))
+#                                    "bayesian_mcmc_gamma_mean", 
+#                                    "bayesian_mcmc_gamma_marg",
+#                                    "bayesian_mcmc_gamma_scs",
+                                    "bayesian_mcmc_beta_mean", 
+                                    "bayesian_mcmc_beta_marg",
+                                    "bayesian_mcmc_beta_scs"))
 
 # 1. Get the base colors from RColorBrewer (use the maximum allowed, which is 11 for "BrBG")
 base_brbg_palette <- brewer.pal(n = 11, name = "BrBG")
@@ -445,7 +459,7 @@ color_ramp_brbg <- colorRampPalette(base_brbg_palette)
 
 # 3. Generate a larger number of colors (e.g., 100) for a very smooth gradient
 precise_palette <- color_ramp_brbg(100)
-
+pal <- wes_palette("Zissou1", 100, type = "continuous")
 ## Equal Tails Plot -------------------------------------------------------
 
 eqt_lu_facet_levels <- levels(factor(df_tot_eqt_long$base_method))
@@ -470,15 +484,17 @@ plot_eqt_l <- df_tot_eqt_long %>%
   filter(C == 3) %>%
   #filter(base_method %in% eqt_lu_facet_levels[1:6])%>%
   ggplot(aes(x=log10(minpnk), y = eqt_l))+ 
-  geom_point(aes(color = prob))+
-  ggh4x::facet_nested( phi ~ "Lower Border" + base_method, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
-                                                                          base_method = new_eqt_labels))+
+  geom_point(aes(color = prob), size = 1)+
+  ggh4x::facet_nested( phi ~ "Lower Border" + base_method, 
+    labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+    base_method = new_eqt_labels))+
   # facet_grid(phi ~ method, labeller = labeller(method = new_eqtails_labels))+ 
   # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ 
   geom_hline(data = hline_data_l, aes(yintercept = y_intercept)) +
   #scale_color_viridis_d()+
-  scale_color_gradientn(colors = precise_palette)+
-  theme_bw() +
+  #scale_color_gradientn(colors = precise_palette)+
+  scale_color_gradientn(colours = pal) +
+  theme_bw(base_size = my_base_size) +
   theme(axis.text.x = element_blank(),
         axis.title.x = element_blank())+
   ylim(0.9, NA) +
@@ -490,31 +506,35 @@ plot_eqt_u <- df_tot_eqt_long %>%
   filter(C == 3) %>%
   #filter(method %in% eqt_lu_facet_levels[7:12])%>%
   ggplot(aes(x=log10(minpnk), y = eqt_u))+ 
-  geom_point(aes(color = prob))+
-  ggh4x::facet_nested( phi ~ "Upper Border" + base_method, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
-                                                                          base_method = new_eqt_labels))+
+  geom_point(aes(color = prob),size = 1)+
+  ggh4x::facet_nested( phi ~ "Upper Border" + base_method, 
+    labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+    base_method = new_eqt_labels))+
   #facet_grid(phi ~ method, labeller = labeller(method = new_eqtails_labels))+ 
   #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ 
   geom_hline(data = hline_data_u, aes(yintercept = y_intercept)) +
   #scale_color_viridis_d()+
-  scale_color_gradientn(colors = precise_palette)+
-  theme_bw() +
+  #scale_color_gradientn(colors = precise_palette)+
+  scale_color_gradientn(colours = pal)+
+  theme_bw(base_size = my_base_size) +
   ylim(0.9, NA) +
   xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
   ylab("Marginal Coverage Probability") +
   labs( colour =  expression(paste("Category Probabilities ", (pi[c]))))
 
 
-plot_eqt_lu_split <- plot_eqt_l / plot_eqt_u + plot_layout(guides = "collect") & 
+plot_eqt_lu_split <- plot_eqt_l / plot_eqt_u + 
+  plot_layout(guides = "collect") & 
   theme(legend.position = "bottom")
 plot_eqt_lu_split
 
-
-ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\Code_and_Data\\Figures\\plot_eqt_lu_all.png",
+# --- Save ---
+ggsave("./Figures/plot_eqt_lu_all.png",
        plot = plot_eqt_lu_split,
-       width = 10, height = 12,
-       dpi = 900)
-
+       width = 7,       # Full text width
+       height = 8.4,      # Max text height
+       units = "in",
+       dpi = 900)      
 
 ## Asymmetry Plot ---------------------------------------------------------
 

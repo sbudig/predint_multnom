@@ -31,7 +31,7 @@ df_sim_settings <- expand.grid(
   n = c(10, 50),
   m = c(1),
   phi = c(1.01, 5),
-  B = 10000,
+  B = 500,
   quant_min = 0.01,
   quant_max = 10,
   alpha = 0.05,
@@ -51,7 +51,7 @@ l_methods <- list(
   Bonferroni = FALSE,
   Bonf_bisec = FALSE,
   pointwise = FALSE,
-  percentile_bt1 = FALSE,
+  percentile_bt1 = TRUE,
   mvn = FALSE,
   percentile_bt_gemini = FALSE,
   nonparametric_bt = FALSE,  
@@ -1469,4 +1469,93 @@ f_calc_pi_bayesian_standardized <- function(df_hist, m, alpha, stan_model) {
 }
 
 
-l_pred_int_bayesian_cauchy[[1]]
+
+# SCSrank function form package MCPAN -------------------------------------
+  l_scs_zc <- lapply(l_df_zc, function(df){
+    abs(SCSrank(as.matrix(df))$conf.int)
+  })  
+  
+  # calculate prediction intervals with rectangular simultaneous confidence set
+  l_pred_int_percentile_bt1 <- mapply(FUN = f_calc_prediction_interval,
+                                      y_hat = l_y_hat_vec,
+                                      q = l_scs_zc,
+                                      se_pred = l_se_pred_vec,
+                                      alternative = as.list(df_sim_settings$alternative),
+                                      SIMPLIFY = FALSE)
+
+
+SCSrank <-
+  function(x, conf.level=0.95, alternative="two.sided")
+  {
+
+    x <- l_df_zc[[1]]
+    conf.level=0.95
+    alternative="two.sided"
+    
+    alternative <- match.arg(alternative, choices=c("two.sided","less","greater"))
+    
+    DataMatrix <- x
+    N <- nrow(DataMatrix)
+    k <- round(conf.level*N,0)
+    RankDat <- apply(DataMatrix,2,rank)
+    
+    switch(alternative,
+           
+           "two.sided"={
+             W1 <- apply(RankDat,1,max)
+             W2 <- N + 1 - apply(RankDat,1,min)
+             
+             Wmat <- cbind(W1,W2)
+             w <- apply(Wmat,1,max)
+             tstar <- round(sort(w)[k],0)
+             
+             SCI <- function(x)
+             {
+               sortx <- sort(x)
+               cbind(sortx[N+1-tstar],sortx[tstar])
+             }
+             
+             SCS <- t(apply(DataMatrix,2,SCI))
+
+              sort(DataMatrix[,1])
+
+
+
+           },
+           
+           "less"={
+             W1 <- apply(RankDat,1,max)
+             tstar <- round(sort(W1)[k],0)
+             
+             SCI <- function(x)
+             {
+               sortx <- sort(x)
+               cbind(-Inf, sortx[tstar])
+             }
+             
+             SCS<-t(apply(DataMatrix,2,SCI))
+           },
+           
+           "greater"={
+             W2 <- N + 1 - apply(RankDat,1,min)
+             tstar <- round(sort(W2)[k],0)
+             
+             SCI <- function(x)
+             {
+               sortx <- sort(x)
+               cbind(sortx[N+1-tstar], Inf)
+             }
+             
+             SCS<-t(apply(DataMatrix,2,SCI))
+             
+           }
+    )
+    # end of switch
+    
+    colnames(SCS)<-c("lower","upper")
+    
+    attr(SCS, which="k")<-k
+    attr(SCS, which="N")<-N
+    OUT<-list(conf.int=SCS, conf.level=conf.level, alternative=alternative)
+    return(OUT)
+  }

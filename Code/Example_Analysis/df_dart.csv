@@ -1,0 +1,9 @@
+Study;Experiment_No;Gavage;Gender;Strain;Pregnant_Females_examined;Live_Fetuses;Early_Resorptions;Late_Resorptions;Dead_Fetus;Whole_Litter_Resorptions
+Dart_01;R20263;Oral;Female;Sprague_Dawley;44;599;22;2;1;0
+Dart_02;R14001;Oral;Female;Harlan_Sprague_Dawley;23;296;21;1;0;0
+Dart_03;R12103;Oral;Female;Harlan_Sprague_Dawley;21;293;7;1;1;0
+Dart_04;R20084C;Oral;Female;Harlan Sprague Dawley;19;209;9;0;0;0
+Dart_05;MOG002B;Dosing_in_Feed;Female;Sprague_Dawley;18;269;9;3;0;0
+Dart_06;MOG003B;Dosing_in_Feed;Female;Sprague_Dawley;19;283;6;0;0;0
+Dart_07;R16011;Oral;Female;Harlan Sprague Dawley;23;314;23;1;0;0
+Dart_08;MOG08002B;Dosing_in_Feed;Female;Sprague_Dawley;16;234;6;0;0;0
