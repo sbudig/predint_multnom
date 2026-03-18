@@ -1108,7 +1108,7 @@ df_pat <- as.data.frame(xy_vec) %>%
   ) %>%
   mutate(Trial = c( rep("Historical", times = 10), "Current"))
 # 
-# write.csv(df_pat, ".\\Code\\Example_Analysis\\df_pat.csv", row.names = FALSE)
+# write.csv(df_pat, ".\\Code_and_Data\\Code\\Example_Analysis\\df_pat.csv", row.names = FALSE)
 
 # df_pat <- read.csv(".\\Code\\Example_Analysis\\df_pat.csv")
 
@@ -1539,7 +1539,7 @@ pred_int_stud
 # Bayesian Hierarchical Model ---------------------------------------------
 
 ## Beta Prior -------------------------------------------------------------
-mod_beta <- cmdstan_model(here("Code", "dirichlet_multinomial_beta_rho.stan"), compile = TRUE)
+mod_beta <- cmdstan_model(here("./Code_and_Data/Code", "dirichlet_multinomial_beta_rho.stan"), compile = TRUE)
 
 pred_int_bayesian_beta <- f_calc_pi_bayesian_mcmc(
   df_hist = dat_pat_hist[, 1:5],
@@ -1552,7 +1552,7 @@ pred_int_bayesian_beta_marg <- pred_int_bayesian_beta$marginal
 pred_int_bayesian_beta_scs <- pred_int_bayesian_beta$scs_rank
 
 ## Half Cauchy Prior ------------------------------------------------------
-mod_cauchy <- cmdstan_model(here("Code", "dirichlet_multinomial_cauchy.stan"), 
+mod_cauchy <- cmdstan_model(here("./Code_and_Data/Code", "dirichlet_multinomial_cauchy.stan"), 
                             compile = TRUE)
 
 pred_int_bayesian_cauchy <- f_calc_pi_bayesian_mcmc(
@@ -1611,7 +1611,7 @@ all_intervals <- list(
   `B: Cauchy (SCS)` = pred_int_bayesian_cauchy_scs
 
 )
-
+#saveRDS(all_intervals, "./Code_and_Data/Code/Example_Analysis/example_patho_all_ints.rds")
 # 5. OUTPUT 1: LaTeX Table (for Supplementary Material)
 # -------------------------------------------------------------------
 # This section creates the wide table with all 10 methods

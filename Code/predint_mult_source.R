@@ -13,8 +13,7 @@ rotate_list <- function(input_list, start_index) {
   
   # Get the total number of elements in the list
   n <- length(input_list)
-  
-  # --- Input Validation ---
+
   # Check if the index is a single numeric value
   if (!is.numeric(start_index) || length(start_index) != 1) {
     stop("Error: 'start_index' must be a single number.")
@@ -30,15 +29,11 @@ rotate_list <- function(input_list, start_index) {
     stop(paste("Error: 'start_index' must be between 1 and", n))
   }
   
-  # --- Rotation Logic ---
-  # If the start index is 1, the list is already in the correct order.
   if (start_index == 1) {
     return(input_list)
   }
   
-  # Create the new order of indices for the rotation.
-  # Part 1: From the start_index to the end of the list.
-  # Part 2: From the beginning of the list to the element just before the start_index.
+  # Create the new order of indices for the rotation
   new_order <- c( (start_index:n), (1:(start_index - 1)) )
   
   # Subset the list using the newly created rotational order
@@ -304,7 +299,7 @@ f_calc_pi <- function(mult_model) {
   # Calculate probabilities using the softmax function
   probs <- exp_coefs / (1 + sum(exp_coefs))
   
-  # Add the probability for the first category (which is 1 minus the sum of other probabilities)
+  # Add the probability for the first category 
   prob_first <- 1 - sum(probs)
   
   # Combine the probabilities for all categories
@@ -312,7 +307,6 @@ f_calc_pi <- function(mult_model) {
 }
 
 # Calculate the expected counts with pi and cluster size ------------------
-
 # takes probability pi and cluster size m to calculate the expected counts
 f_calc_y_hat <- function(pi_hat, m){
   y_hat <- pi_hat * m
@@ -375,13 +369,13 @@ f_replace_phi_above_val <- function(phi, val) {
 
 f_calc_se_pred_star_internal <- function(phi_hat, pi_hat_vec, m, N_hist){
   
-  # Variance of fut. random variable
+  # variance of fut. random variable
   var_y_star <- m * phi_hat * pi_hat_vec * (1-pi_hat_vec)
   
-  # Variance of fut. expectation
+  # variance of fut. expectation
   var_y_star_hat <- (m^2 * phi_hat * pi_hat_vec * (1-pi_hat_vec))/N_hist
   
-  # Prediction SE
+  # prediction SE
   se_pred <- sqrt(var_y_star + var_y_star_hat)
   
   
@@ -863,9 +857,6 @@ f_bisection <- function(y_star_hat,
       return(c)
     }
     
-    # If another iteration is required,
-    # check the signs of the function at the points c and a and reassign
-    # a or b accordingly as the midpoint to be used in the next iteration.
     if(sign(runval)==1){
       quant_min <- c}
     
@@ -874,8 +865,6 @@ f_bisection <- function(y_star_hat,
     
     
   }
-  # If the max number of iterations is reached and no root has been found,
-  # return message and end function.
   warning('Too many iterations, but the quantile of the last step is returned')
   
   if(traceplot==TRUE){
@@ -1018,34 +1007,26 @@ SCSrank <-
 # Calculate critical value based on MVN approximation --------------------
 f_calc_q_mvn <- function(phi_hat, pi_hat, m, N_hist, alpha) {
   
-  # Return NA if inputs are null
   if (is.null(phi_hat) || is.null(pi_hat)) {
     return(NA)
   }
   
   C <- length(pi_hat)
   
-  # If there's only one category, it's not a multinomial problem.
-  # Return standard normal quantile.
   if (C <= 1) {
     return(qnorm(1 - alpha / 2))
   }
   
-  # Use a tryCatch block in case the correlation matrix is not positive definite
   q_mvn <- tryCatch({
     
-    # Calculate the prediction covariance matrix
     Sigma_pi_hat <- diag(pi_hat) - pi_hat %*% t(pi_hat)
     Sigma_pred <- phi_hat * m * (1 + m / N_hist) * Sigma_pi_hat
     
-    # Convert to a correlation matrix
     R_pred <- cov2cor(Sigma_pred)
     
-    # Get the simultaneous critical value
     qmvnorm(1 - alpha, corr = R_pred, tail = "both.tails")$quantile
     
   }, error = function(e) {
-    # If qmvnorm fails, return NA
     return(NA)
   })
   
@@ -1059,30 +1040,24 @@ f_calc_zc_help <- function(y_star, y_star_hat, se){
 
 f_calc_zc_main <- function(l_y_star, l_y_star_hat, l_se, n_cat) {
   
-  # If any list is empty, return NULL
   if (length(l_y_star) == 0 || length(l_y_star_hat) == 0 || length(l_se) == 0) {
     return(NULL)
   }
   
-  # Find indices of valid bootstrap replicates. A replicate is valid only if
-  # its y_star, y_star_hat, and se all have the correct length (n_cat).
   valid_indices <- which(
     sapply(l_y_star, function(x) !is.null(x) && length(x) == n_cat) &
       sapply(l_y_star_hat, function(x) !is.null(x) && length(x) == n_cat) &
       sapply(l_se, function(x) !is.null(x) && length(x) == n_cat)
   )
   
-  # If no valid replicates are found after filtering, return NULL.
   if (length(valid_indices) == 0) {
     return(NULL)
   }
   
-  # Subset the lists to include only data from the valid replicates.
   l_y_star_valid <- l_y_star[valid_indices]
   l_y_star_hat_valid <- l_y_star_hat[valid_indices]
   l_se_valid <- l_se[valid_indices]
   
-  # Now, perform the calculation only on the consistently-sized vectors.
   zc_list <- mapply(
     FUN = f_calc_zc_help,
     y_star = l_y_star_valid,
@@ -1090,8 +1065,7 @@ f_calc_zc_main <- function(l_y_star, l_y_star_hat, l_se, n_cat) {
     se = l_se_valid,
     SIMPLIFY = FALSE
   )
-  
-  # This rbind will now work because all elements in zc_list have the same length.
+
   do.call(rbind, zc_list)
   
 }
@@ -1100,11 +1074,8 @@ f_calc_zc_main <- function(l_y_star, l_y_star_hat, l_se, n_cat) {
 # Resamples the original historical data clusters with replacement
 f_bt_mult_dat_nonparametric <- function(df_hist, B) {
   
-  # Get the number of historical clusters (rows)
   k <- nrow(df_hist)
   
-  # Replicate B times: sample row indices with replacement
-  # and create a list of B new dataframes.
   replicate(n = B, {
     resampled_indices <- sample(1:k, size = k, replace = TRUE)
     df_hist[resampled_indices, ]
@@ -1114,32 +1085,25 @@ f_bt_mult_dat_nonparametric <- function(df_hist, B) {
 # Adjust a list of phi values based on a minimum and maximum value --------
 f_adjust_phi_list <- function(l_phi, m_value) {
   
-  # If the list is NULL, return NULL
   if (is.null(l_phi)) {
     return(NULL)
   }
   
-  # Use lapply to iterate through each phi in the list
   lapply(l_phi, function(phi) {
     
-    # Handle NULL or NA phi values gracefully
     if (is.null(phi) || is.na(phi)) {
       return(phi)
     }
-    
-    # 1. First, set a "floor" for phi at 1.01 to handle underdispersion.
+
     if (phi <= 1) {
       return(1.01)
-      # 2. Else, check if phi is too large compared to the cluster size m.
     } else if (phi > m_value) {
       return(m_value * 0.975)
-      # 3. Otherwise, the phi value is acceptable as is.
     } else {
       return(phi)
     }
   })
 }
-
 
 #  Helper function to construct a simultaneous PI from posterior p --------
 f_calc_pi_bayesian_standardized <- function(post_pred_samples, alpha) {
@@ -1151,7 +1115,7 @@ f_calc_pi_bayesian_standardized <- function(post_pred_samples, alpha) {
   # Handle zero variance if a category never occurs (prevent div by zero)
   y_sd_bayes[y_sd_bayes == 0] <- 1e-6 
   
-  # 2. Calculate STANDARDIZED residuals (Pivotal Quantity) for every sample
+  # 2. Calculate standardized residuals for every sample
   # (Sample - Mean) / SD
   # sweep subtracts mean, then sweep divides by SD
   z_scores <- sweep(post_pred_samples, 2, y_bar_bayes, "-")
@@ -1235,24 +1199,18 @@ f_calc_pi_bayesian_mcmc <- function(df_hist, m, alpha, stan_model) {
   
   # --- 3. Method 3: SCSrank Simultaneous Interval ---
   pi_scs_rank <- tryCatch({
-    # Use conf.level = 1 - alpha
     conf_matrix <- SCSrank(post_pred_samples, conf.level = 1 - alpha)$conf.int
-    # convert matrix to data.frame
     as.data.frame(conf_matrix)
   }, error = function(e) {
-    # Return an NA-filled data frame if SCSrank fails
     warning(paste("SCSrank failed on posterior samples:", e$message))
     data.frame(lower = rep(NA, ncol(post_pred_samples)),
                upper = rep(NA, ncol(post_pred_samples)))
   })
-  # Ensure column names match the other data frames
+
   colnames(pi_scs_rank) <- c("lower", "upper")
   
-  
-  # Clean up Stan files
   suppressWarnings(file.remove(fit$output_files()))
   
-  # Return all three intervals in a named list
   return(list(
     mean_centered = pi_mean_centered,
     marginal = pi_marginal,
@@ -1398,7 +1356,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
   l_N_hist <- sapply(l_x_k_vec, function(df)
     sum(rowSums(df[grep("^V", names(df))])))
   
-  # Remove l_mult_dat to free up memory (not removed, need for later methods)
+  # Remove l_mult_dat to free up memory
   # rm(l_x_k_vec)
   # gc()
   
@@ -1517,8 +1475,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
             v_pi = current_pi
           ))
         }, error = function(e) {
-          # This block is executed ONLY if an error occurs in the code above.
-          # We print a message to the console to stay informed that a retry is happening.
+          # This block is executed only if an error occurs in the code above.
           message("Main bootstrap x: An error in data generation was caught. Retrying...")
           count_error_mbt <- count_error_mbt + 1
           
@@ -1526,8 +1483,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
             message("Main bootstrap x: Ten errors occurred and were caught. Retrying with phi*0.99")
             current_phi_n <- current_phi_n*0.99
           }
-          # By not assigning anything to x_star_b here, the variable remains NULL,
-          # ensuring the while-loop runs again.
         })
       }
       
@@ -1538,11 +1493,11 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
         }
       }
       
-      # 2. Fit model to the bootstrap sample
+      # Fit model to the bootstrap sample
       model_x_star <- f_fit_mult(df_i = x_star_b, modeltype = "multinomial")
       
       if (!is.null(model_x_star[[1]])) {
-        # 3. Calculate bootstrap statistics
+        # Calculate bootstrap statistics
         pi_star_hat_b <- f_calc_pi(model_x_star[[1]])
         phi_star_hat_b <- f_estimate_phi(model = model_x_star[[1]], dispersion = current_disp)
         
@@ -1552,7 +1507,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
         y_star_hat_b_list[[b]] <- f_calc_y_hat(pi_star_hat_b, current_m)
         se_pred_star_b_list[[b]] <- f_calc_se_pred_star_internal(phi_star_hat_b, pi_star_hat_b, current_m, current_N_hist)
         
-        # 4. Generate ONE future bootstrap sample (if needed by methods)
+        # Generate ONE future bootstrap sample (if needed by methods)
         if (l_methods$bisection || l_methods$bisection_asym || l_methods$Bonf_bisec || l_methods$percentile_bt1) {
           
           y_star_b <- NULL
@@ -1568,8 +1523,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
                 n = current_m
               ))
             }, error = function(e) {
-              # This block is executed ONLY if an error occurs in the code above.
-              # We print a message to the console to stay informed that a retry is happening.
               message("Main bootstrap y: An error in data generation was caught. Retrying...")
               count_error_mbty <- count_error_mbty + 1
               
@@ -1577,16 +1530,12 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
                 message("Main bootstrap y: Ten errors occurred and were caught. Retrying with phi*0.99")
                 current_phi_m <- current_phi_m*0.99
               }
-              
-              # By not assigning anything to x_star_b here, the variable remains NULL,
-              # ensuring the while-loop runs again.
             })
           }
           
           y_star_b_list[[b]] <- y_star_b
         }
       }
-      # The large objects 'x_star_b' and 'model_x_star' are discarded at the end of the loop
     }
     
     # Return a list of all calculated bootstrap results for this setting
@@ -1610,8 +1559,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
   l_y_star_b_vec <- lapply(bootstrap_results, `[[`, "y_star_b_vec")
 
   }
-  
-  # Explicitly call garbage collection after the big loop
+
   gc()
   
   # create simulation result dataframe
@@ -2009,7 +1957,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
   
   gc()
   
-  # Frank Aufschrieb
   # y_star: bt_fut_y_star
   # y_star_hat: bt_hist_y_star_hat
   # se: bt_hist_se
@@ -2147,7 +2094,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
   }
   
   
-  # use Percentile Bootstrap (Gemini Corrected Method) to compute prediction intervals
+  # use Percentile Bootstrap (Gemini Method) to compute prediction intervals
   if (l_methods$percentile_bt_gemini) {
     
     # This part remains the same: calculate the matrix of pivotal quantities (standardized residuals)
@@ -2159,7 +2106,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
                       MoreArgs = list(n_cat = ncol(m_true_pi_vec)),
                       SIMPLIFY = FALSE)
     
-    # --- CORRECTED LOGIC STARTS HERE ---
     # Instead of SCSrank, we now find the quantile of the maximum absolute residuals.
     l_q_percentile <- lapply(seq_along(l_df_zc), function(i) {
       
@@ -2178,7 +2124,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
       
       return(q_val)
     })
-    # --- CORRECTED LOGIC ENDS HERE ---
     
     
     # Calculate prediction intervals with the new single critical value q
@@ -2209,7 +2154,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
       all(counts >= lower & counts <= upper)
     })
     
-    # This part also remains the same
     l_cwi_percentile_bt_gemini <- mapply(FUN = f_compare_with_intervals,
                                          data = l_y_vec,
                                          intervals = l_pred_int_percentile_bt_gemini, SIMPLIFY = FALSE)
@@ -2338,7 +2282,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
       zc_list <- as.list(data.frame(zc_matrix))
       valid_zc <- zc_list[!sapply(zc_list, is.null)]
       
-      if (length(valid_zc) < 2) { # Need at least 2 valid replicates for SCSrank
+      if (length(valid_zc) < 2) { 
         l_scs_zc_np[[i]] <- NULL
         next
       }
@@ -2353,10 +2297,7 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
         return(NULL)
       })
     }
-    
-    # The rest of the logic remains the same as in your original code.
-    # It uses the calculated critical values to construct prediction intervals and assess coverage.
-    
+       
     l_pred_int_nonparametric_bt <- mapply(FUN = f_calc_prediction_interval,
                                           y_hat = l_y_hat_vec,
                                           q = l_scs_zc_np,
@@ -2552,7 +2493,6 @@ f_predint_mult_sim <- function(m_true_pi_vec, df_sim_settings, l_methods,  mod_g
   # Bayesian Hierarchical MCMC Model (Beta Prior on Rho) ---
   if (l_methods$bayesian_mcmc_beta) {
     
-       # l_pred_int_bayesian_beta is now a list of lists.
     l_pred_int_bayesian_beta <- mapply(
       FUN = f_calc_pi_bayesian_mcmc,
       df_hist = l_x_k_vec,
@@ -2648,25 +2588,19 @@ f_global_sim <- function(m_true_pi_vec, df_sim_settings, l_methods) {
   # Check if a parallel plan is configured
   if (is(future::plan(), "multisession") || is(future::plan(), "multicore") || is(future::plan(), "cluster")) {
     
-    # Initialize variables for the retry loop
     df_multsim_res <- NULL
     failures <- 0
     
-    # Loop indefinitely until the operation is successful
     while (is.null(df_multsim_res)) {
       
       tryCatch({
-        
-        # --- The code to be executed and retried on error ---
-        
-        # Provide a status message. The message is different after the first attempt.
+
         if (failures > 0) {
           message(paste("Retrying parallel computation... (Previous attempts failed", failures, "time(s))"))
         } else {
           message("Starting parallel computation with future_lapply...")
         }
         
-        # 1. Execute the parallel computation
         result_list <- future_lapply(l_prop, 
                                      f_predint_mult_sim, 
                                      df_sim_settings = df_sim_settings, 
@@ -2676,17 +2610,12 @@ f_global_sim <- function(m_true_pi_vec, df_sim_settings, l_methods) {
                                      mod_beta = mod_beta,
                                      future.seed = TRUE)
         
-        # 2. If future_lapply is successful, combine the results. This breaks the while-loop.
         df_multsim_res <- do.call(rbind, result_list)
         
         message("Parallel computation completed successfully.")
         
       }, error = function(e) {
         
-        # --- This block executes if an error occurs ---
-        
-        # Increment the failure counter. The <<- operator is used to modify the
-        # 'failures' variable in the parent environment from within this function.
         failures <<- failures + 1
         
         if (failures > 1) {
@@ -2696,7 +2625,6 @@ f_global_sim <- function(m_true_pi_vec, df_sim_settings, l_methods) {
         }
         
         message(paste("An error occurred. This was failure number", failures, "."))
-        # Print the actual error message for debugging
         message("Error message: ", e$message) 
         message("Retrying in 10 seconds...")
         Sys.sleep(10) # Pause for 10 seconds before the next attempt
@@ -2704,7 +2632,6 @@ f_global_sim <- function(m_true_pi_vec, df_sim_settings, l_methods) {
     }
     
   } else {
-    # --- Original code for sequential execution (no changes needed here) ---
     message("Starting sequential computation with lapply")
     df_multsim_res <-
       do.call(rbind,

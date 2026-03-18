@@ -14,7 +14,7 @@ setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Manuskript\R
 # Explanation of variables ------------------------------------------------
 
 # This script processes simulation results from .rds files. It calculates coverage
-# probabilities, equi-tailed probabilities, and confidence interval widths for
+# probabilities, equi-tailedness properties, and confidence interval widths for
 # various statistical methods. The final output is a set of long-format
 # ("tidy") data frames suitable for analysis and plotting.
 
@@ -34,22 +34,31 @@ GROUPING_VARS <- c(
   "minpnk", "minp", "maxp"
 )
 
+# Names of the different coverage methods being analyzed
+# COVERAGE_METHODS <- c(
+#   "coverage_pointwise", "coverage_bonferroni", "coverage_bisection",
+#   "coverage_bisection_asym", "coverage_bonf_bisec", "coverage_mvn",
+#   "coverage_percentile_bt1", "coverage_percentile_bt_gemini",
+#   "coverage_nonparametric_bt", "coverage_bayesian_mcmc_cauchy",
+#   "coverage_bayesian_mcmc_gamma"
+# )
+
 COVERAGE_METHODS <- c(
-  "coverage_pointwise", "coverage_bonferroni", "coverage_bisection",
-  "coverage_bisection_asym", "coverage_bonf_bisec", "coverage_mvn",
-  "coverage_percentile_bt1", "coverage_percentile_bt_gemini",
-  "coverage_bayesian_mcmc_cauchy_mean", "coverage_bayesian_mcmc_cauchy_marg", "coverage_bayesian_mcmc_cauchy_scs",
-  "coverage_bayesian_mcmc_beta_mean", "coverage_bayesian_mcmc_beta_marg","coverage_bayesian_mcmc_beta_scs"
+  "coverage_pointwise", "coverage_bonferroni"
 )
-
-
 
 result_dirs <- c(".\\Results\\intermediate_results\\threecats\\",
                  ".\\Results\\intermediate_results\\fivecats\\",
                  ".\\Results\\intermediate_results\\tencats\\"
 )
 
-# Load and Summarize Data in a Single Step -----------------------------
+
+result_dirs <- c(".\\Results\\intermediate_results\\test\\threecats\\",
+                 ".\\Results\\intermediate_results\\test\\fivecats\\",
+                 ".\\Results\\intermediate_results\\test\\tencats\\"
+)
+
+# 1. Load and Summarize Data in a Single Step -----------------------------
 
 df_tot_covprob_long <- NULL
 df_tot_eqt_long <- NULL
@@ -58,6 +67,9 @@ df_tot_asymmetry <- NULL
 
 for (i in 1:length(result_dirs)) {
   
+# Use purrr::map_dfr to read all .rds files and row-bind them into a single
+# data frame. This is significantly more efficient than a for-loop with rbind.
+# Then, perform a single group_by and summarise operation.
 df_summary <- list.files(
   path = result_dirs[i],
   pattern = "\\.rds$",
@@ -68,11 +80,11 @@ df_summary <- list.files(
   summarise(
     total_sim = n(),
     
-    # Calculate coverage probabilities
+    # Calculate coverage probabilities (no change here)
     across(all_of(COVERAGE_METHODS),
            ~ mean(as.integer(.), na.rm = TRUE),
            .names = "covprob_{.col}"),
-    # Calculate equi-tailed probabilities
+    # Calculate equi-tailed property using a regex to match all V# columns
     across(matches("_V\\d+$"), 
            ~ (n() - sum(. == 1, na.rm = TRUE)) / n(),
            .names = "{.col}_eqt_u"),
@@ -80,7 +92,7 @@ df_summary <- list.files(
            ~ (n() - sum(. == -1, na.rm = TRUE)) / n(),
            .names = "{.col}_eqt_l"),
     
-    # calculations for the error probabilities
+    # calculations for the ERROR probabilities
     across(matches("_V\\d+$"), 
            ~ sum(. == 1, na.rm = TRUE) / n(),
            .names = "{.col}_error_u"),
@@ -88,18 +100,18 @@ df_summary <- list.files(
            ~ sum(. == -1, na.rm = TRUE)  / n(),
            .names = "{.col}_error_l"),
     
-    # Calculate mean of width statistics
+    # Calculate mean of width statistics (no change here)
     across(ends_with(c("_avg_width", "_median_width", "_sd_width", "_q25_width", "_q75_width")),
            ~ mean(., na.rm = TRUE)),
     
-    # Summarise error/warning counts
+    # Summarise error/warning counts (no change here)
     across(c(czercounts, cerrnas, cerrfin, cwarwz, cwarcon, cwarany, cwarzc),
            ~ sum(., na.rm = TRUE)),
     
     .groups = "drop" # Drop grouping for subsequent operations
   )
 
-# Reshape Data to Tidy (Long) Format ------------------------------------
+# 2. Reshape Data to Tidy (Long) Format ------------------------------------
 
 # Pivot coverage probabilities to long format
 df_covprob_long <- df_summary %>%
@@ -122,13 +134,17 @@ df_eqt_long <- df_summary %>%
     method,
     into = c("base_method", "CategoryNumber"),
     regex = "(.+)_V(\\d+)",
-    remove = FALSE, 
-    convert = TRUE  
+    remove = FALSE, # Set to TRUE if you want to delete the original 'method' column
+    convert = TRUE  # Automatically converts CategoryNumber to numeric
   ) %>%
   rowwise() %>%
   mutate(
     prob = {
+      # Extract all numbers that look like "0.01", "0.98", etc.
       all_probs <- str_extract_all(probs, "\\d+\\.\\d+")[[1]]
+      
+      # Select the correct probability using CategoryNumber as the index
+      # and convert it to a numeric type
       as.numeric(all_probs[CategoryNumber])
     }
   ) %>%
@@ -138,12 +154,15 @@ df_eqt_long <- df_summary %>%
 df_asymmetry <- df_summary %>%
   dplyr::select(all_of(GROUPING_VARS), total_sim, ends_with(c("_error_l", "_error_u"))) %>%
   
+  # Pivot the ERROR probability columns
   pivot_longer(
     cols = ends_with(c("_error_l", "_error_u")),
     names_to = c("method", ".value"),
+    # This pattern will create 'error_u' and 'error_l' columns
     names_pattern = "(.*)_(error_[ul])" 
   ) %>%
   
+  # Now calculate the asymmetry ratio using the correct error probabilities
   mutate(
     asymmetry_ratio = ifelse(error_l > 0 & error_u > 0, error_u / error_l, NA_real_)
   ) %>% 
@@ -151,17 +170,53 @@ df_asymmetry <- df_summary %>%
     method,
     into = c("base_method", "CategoryNumber"),
     regex = "(.+)_V(\\d+)",
-    remove = FALSE, 
-    convert = TRUE  
+    remove = FALSE, # Set to TRUE if you want to delete the original 'method' column
+    convert = TRUE  # Automatically converts CategoryNumber to numeric
   ) %>%
   rowwise() %>%
   mutate(
     prob = {
+      # Extract all numbers that look like "0.01", "0.98", etc.
       all_probs <- str_extract_all(probs, "\\d+\\.\\d+")[[1]]
+      
+      # Select the correct probability using CategoryNumber as the index
+      # and convert it to a numeric type
       as.numeric(all_probs[CategoryNumber])
     }
   ) %>%
   ungroup()
+
+
+# Pivot equi-tailedness data robustly into a single data frame
+# df_eqt_long <- df_summary %>%
+#   select(all_of(GROUPING_VARS), total_sim, ends_with(c("_eqt_l", "_eqt_u"))) %>%
+#   pivot_longer(
+#     cols = ends_with(c("_eqt_l", "_eqt_u")),
+#     names_to = c("method", ".value"),
+#     names_pattern = "(.*)_(eqt_[ul])"
+#   ) %>%
+#   mutate(
+#     asymmetry_ratio = ifelse(eqt_l > 0, eqt_u / eqt_l, NA_real_)
+  # ) %>%
+  # extract(
+  #   method,
+  #   into = c("base_method", "CategoryNumber"),
+  #   regex = "(.+)_V(\\d+)",
+  #   remove = FALSE, # Set to TRUE if you want to delete the original 'method' column
+  #   convert = TRUE  # Automatically converts CategoryNumber to numeric
+  # ) %>%
+  # rowwise() %>%
+  # mutate(
+  #   prob = {
+  #     # Extract all numbers that look like "0.01", "0.98", etc.
+  #     all_probs <- str_extract_all(probs, "\\d+\\.\\d+")[[1]]
+  # 
+  #     # Select the correct probability using CategoryNumber as the index
+  #     # and convert it to a numeric type
+  #     as.numeric(all_probs[CategoryNumber])
+  #   }
+  # ) %>%
+  # ungroup()
 
 # Pivot all width statistics into a single tidy data frame
 df_widths_long <- df_summary %>%
@@ -175,7 +230,7 @@ df_widths_long <- df_summary %>%
   pivot_wider(
     names_from = statistic,
     values_from = value,
-    names_glue = "{statistic}_width" 
+    names_glue = "{statistic}_width" # Recreate original-style names
   )
 
 df_tot_covprob_long <- rbind(df_tot_covprob_long, df_covprob_long)
@@ -184,11 +239,21 @@ df_tot_widths_long <- rbind(df_tot_widths_long, df_widths_long)
 df_tot_asymmetry <- rbind(df_tot_asymmetry, df_asymmetry)
 }
 
-# Some checks
 unique(df_tot_covprob_long$total_sim)
 unique(df_tot_covprob_long$probs)
-unique(df_tot_covprob_long$k)
-unique(df_tot_covprob_long$n)
+
+simulations_per_prob <- df_tot_covprob_long %>%
+  
+  # Group by the probability vector column
+  group_by(probs, phi, k, n, m, C, covprob_type) %>%
+  
+  # Sum the 'total_sim' count for each group
+  summarise(
+    total_simulations = sum(total_sim)
+  )
+
+unique(simulations_per_prob$total_simulations)
+
 
 
 # Plots -------------------------------------------------------------------
@@ -197,11 +262,13 @@ my_base_size <- 10 # font size
 
 # Colors
 
-# Okabe-Ito Palette (Colorblind Safe)
+# Define the Okabe-Ito Palette (Colorblind Safe)
 # Order: Orange, Sky Blue, Bluish Green, Yellow, Blue, Vermillion, Reddish Purple, Grey
 oi_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
 
+# Define specific mappings to ensure consistency across plots
 # Map Categories (C) to specific colors (Plot 1)
+# Using 3 distinct colors from the palette
 cols_categories <- c("3" = oi_palette[2],  # Sky Blue
                      "5" = oi_palette[1],  # Orange
                      "10" = oi_palette[6]) # Vermillion
@@ -210,39 +277,15 @@ cols_categories <- c("3" = oi_palette[2],  # Sky Blue
 
 new_covprob_labels <- c(
   "coverage_pointwise" = "Pointwise",
-  "coverage_bonferroni" = "Bonferroni",
-  "coverage_bisection" = "Sym. Calibration",
-  "coverage_bisection_asym" = "Asym. Calibration",
-  "coverage_bonf_bisec" = "Marg. Calibration",
-  "coverage_mvn" = "MVN",
-  "coverage_percentile_bt1" = "Rank-Based SCS",
-  "coverage_percentile_bt_gemini" = "Max. Abs. Res.",
-  "coverage_bayesian_mcmc_cauchy_mean" = "B: Cauchy (mean)", 
-  "coverage_bayesian_mcmc_cauchy_marg" = "B: Cauchy (marg)", 
-  "coverage_bayesian_mcmc_cauchy_scs" = "B: Cauchy (SCS)",
-  "coverage_bayesian_mcmc_beta_mean" = "B: Beta (mean)", 
-  "coverage_bayesian_mcmc_beta_marg" = "B: Beta (marg)",
-  "coverage_bayesian_mcmc_beta_scs" = "B: Beta (SCS)"
+  "coverage_bonferroni" = "Bonferroni"
 )
 
 df_tot_covprob_long <- df_tot_covprob_long %>% 
   mutate(covprob_type = fct_relevel(covprob_type, 
                                     "coverage_pointwise", 
-                                    "coverage_mvn", 
-                                    "coverage_bonferroni",
-                                    "coverage_bisection",
-                                    "coverage_bisection_asym",
-                                    "coverage_bonf_bisec",
-                                    "coverage_percentile_bt_gemini",
-                                    "coverage_percentile_bt1",
-                                    "coverage_bayesian_mcmc_cauchy_mean", 
-                                    "coverage_bayesian_mcmc_cauchy_marg", 
-                                    "coverage_bayesian_mcmc_cauchy_scs",
-                                    "coverage_bayesian_mcmc_beta_mean", 
-                                    "coverage_bayesian_mcmc_beta_marg",
-                                    "coverage_bayesian_mcmc_beta_scs"))
+                                    "coverage_bonferroni"))
 
-### complete Plot -------------------------------------------------------
+### Kompletter Plot -------------------------------------------------------
 df_tot_covprob_long <- df_tot_covprob_long %>%
   mutate(rho = (phi - 1) / (n - 1),
     sum_rho = ifelse(rho <= 0.1, 0.1, rho))
@@ -272,139 +315,95 @@ plot_covprob_all <- df_tot_covprob_long %>%
 plot_covprob_all
 
 ### Splitted in 2 parts ---------------------------------------------------
-# Used in Manuscript Figure 1
 
 # Get the names of your facet levels in their current order
 facet_levels <- levels(factor(df_tot_covprob_long$covprob_type))
 
+# --- Plot 1: First 5 facets ---
 plot_covprob_top <- df_tot_covprob_long %>%
   filter(covprob_type %in% facet_levels[1:5]) %>%
   arrange(desc(C)) %>%
-  ggplot(aes(x = minpn, y = covprob)) +
-  geom_point(aes(color = factor(C), shape = factor(k)), size = 1.25, alpha = 1) +
-  facet_grid(
-    phi ~ covprob_type,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      covprob_type = new_covprob_labels
-    )
-  ) +
+  ggplot(aes(x = log10(minpnk), y = covprob)) +
+  geom_point(aes(color = factor(C), shape = factor(n)), size = 1.25, alpha = 1) +
+  facet_grid(phi ~ covprob_type, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+                                                     covprob_type = new_covprob_labels)) +
   geom_hline(yintercept = 0.95) +
   geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
   geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
-  scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
-  ) +
-  coord_cartesian(ylim = c(0.75, 1)) +
+  ylim(0.75, 1) +
   ylab("Coverage Probability") +
-  labs(colour = "No. of categories (C)", shape = "No. of clusters (k)") +
+  #labs(colour =  expression(paste("Probability Vector ",(bold("\u03C0")[true]))), shape = "Cluster Size (n)")  +
+  labs(colour = "No. of categories (C)", shape = "Cluster Size (n)")  +
+  xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
   theme_bw(base_size = my_base_size) +
-  theme(
-    axis.text.x = element_blank(),
-    axis.title.x = element_blank()
-  ) +
-  scale_color_manual(values = cols_categories, name = "No. of categories (C)")
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())+
+  #scale_color_viridis(discrete=TRUE,direction = -1, begin = 0.2)
+  #scale_color_brewer(palette = "Dark2", name = "No. of categories (C)")
+  scale_color_manual(values = cols_categories, name = "No. of categories (C)") 
+  #scale_color_npg(name = "No. of categories (C)")
 
+# --- Plot 2: Remaining 5 facets ---
 plot_covprob_bottom <- df_tot_covprob_long %>%
-  filter(covprob_type %in% facet_levels[c(6, 7, 8, 11, 14)]) %>%
+  filter(covprob_type %in% facet_levels[c(6,7,8,11,14)]) %>% 
   arrange(desc(C)) %>%
-  ggplot(aes(x = minpn, y = covprob)) +
-  geom_point(aes(color = factor(C), shape = factor(k)), size = 1.25, alpha = 1) +
-  facet_grid(
-    phi ~ covprob_type,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      covprob_type = new_covprob_labels
-    )
-  ) +
+  ggplot(aes(x = log10(minpn), y = covprob)) +
+  geom_point(aes(color = factor(C), shape = factor(n)), size = 1.25, alpha = 1) +
+  facet_grid(phi ~ covprob_type, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+                                                     covprob_type = new_covprob_labels)) +
   geom_hline(yintercept = 0.95) +
   geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
   geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
-  scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
-  ) +
-  coord_cartesian(ylim = c(0.75, 1)) +
+  ylim(0.75, 1) +
   ylab("Coverage Probability") +
-  labs(colour = "No. of categories (C)", shape = "No. of clusters (k)") +
+  #labs(colour =  expression(paste("Probability Vector ",(bold("\u03C0")[true]))), shape = "Cluster Size (n)")   +
+  labs(colour = "No. of categories (C)", shape = "Cluster Size (n)")   +
+  xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
   theme_bw(base_size = my_base_size) +
-  scale_color_manual(values = cols_categories, name = "No. of categories (C)")
+  #scale_color_viridis(discrete=TRUE, direction = -1, begin = 0.2)
+  #scale_color_brewer(palette = "Dark2", name = "No. of categories (C)")
+  scale_color_manual(values = cols_categories, name = "No. of categories (C)") 
+#scale_color_npg(name = "No. of categories (C)")
 
-
+# The / operator stacks plots vertically
+# plot_layout ensures a single, shared legend
 plot_covprob_all_split <- plot_covprob_top / plot_covprob_bottom + 
   plot_layout(guides = "collect") & 
   theme(legend.position = "bottom")
 
 plot_covprob_all_split
 
-# --- Save --- 
-# Figure 1 in Manuscript
-ggsave("./Figures/plot_covprob_all.png",
-       plot = plot_covprob_all_split,
+
+plot_covprob_top <- df_tot_covprob_long %>%
+  filter(covprob_type %in% facet_levels[1:5]) %>%
+  arrange(desc(C)) %>%
+  ggplot(aes(x = log10(minpnk), y = covprob)) +
+  geom_point(aes(color = factor(C), shape = factor(n)), size = 1.25, alpha = 1) +
+  facet_grid(phi ~ covprob_type, labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+                                                     covprob_type = new_covprob_labels)) +
+  geom_hline(yintercept = 0.95) +
+  geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
+  geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
+  ylim(0.75, 1) +
+  ylab("Coverage Probability") +
+  #labs(colour =  expression(paste("Probability Vector ",(bold("\u03C0")[true]))), shape = "Cluster Size (n)")  +
+  labs(colour = "No. of categories (C)", shape = "Cluster Size (n)")  +
+  xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
+  theme_bw(base_size = my_base_size) 
+  #scale_color_viridis(discrete=TRUE,direction = -1, begin = 0.2)
+  #scale_color_brewer(palette = "Dark2", name = "No. of categories (C)")
+  scale_color_manual(values = cols_categories, name = "No. of categories (C)") 
+  #scale_color_npg(name = "No. of categories (C)")
+
+
+# --- Save ---
+ggsave("./Figures/plot_covprob_test.png",
+       plot = plot_covprob_top,
        width = 7,       # Full text width
-       height = 9,      # Max text height
+       height = 7,      # Max text height
        units = "in",
        dpi = 900)      
 
-
-# Only three categories
-plot_covprob_top <- df_tot_covprob_long %>%
-  filter(covprob_type %in% facet_levels[1:5]) %>%
-  filter(C == 3) %>%
-  arrange(desc(C)) %>%
-  ggplot(aes(x = minpn, y = covprob)) +
-  geom_point(aes(color = factor(k)), size = 1.25, alpha = 1) +
-  facet_grid(
-    phi ~ covprob_type,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      covprob_type = new_covprob_labels
-    )
-  ) +
-  geom_hline(yintercept = 0.95) +
-  geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
-  geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
-  scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
-  ) +
-  coord_cartesian(ylim = c(0.75, 1)) +
-  ylab("Coverage Probability") +
-  labs(colour = "No. of clusters (k)") +
-  theme_bw(base_size = my_base_size) +
-  theme(
-    axis.text.x = element_blank(),
-    axis.title.x = element_blank()
-  ) 
-
-plot_covprob_bottom <- df_tot_covprob_long %>%
-  filter(covprob_type %in% facet_levels[c(6, 7, 8, 11, 14)]) %>%
-  filter(C == 3) %>%
-  arrange(desc(C)) %>%
-  ggplot(aes(x = minpn, y = covprob)) +
-  geom_point(aes(color = factor(k)), size = 1.25, alpha = 1) +
-  facet_grid(
-    phi ~ covprob_type,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      covprob_type = new_covprob_labels
-    )
-  ) +
-  geom_hline(yintercept = 0.95) +
-  geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
-  geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
-  scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
-  ) +
-  coord_cartesian(ylim = c(0.75, 1)) +
-  ylab("Coverage Probability") +
-  labs(colour = "No. of clusters (k)") +
-  theme_bw(base_size = my_base_size)
-
-
-plot_covprob_all_split <- plot_covprob_top / plot_covprob_bottom + 
-  plot_layout(guides = "collect") & 
-  theme(legend.position = "bottom")
-
-plot_covprob_all_split
 
 
 ## Equal Tail Probability -------------------------------------------------
@@ -417,7 +416,7 @@ new_eqt_labels <- c(
   "bisection_asym" = "Asym. Calibration",
   "bonf_bisec" = "Marg. Calibration",
   "mvn" = "MVN",
-  "percentile_bt_gemini" = "Max. Abs. Res.",
+  "percentile_bt_gemini" = "MASR",
   "percentile_bt1" = "Rank-Based SCS",
   "bayesian_mcmc_cauchy_mean" = "B: Cauchy (mean)", 
   "bayesian_mcmc_cauchy_marg" = "B: Cauchy (marg)", 
@@ -435,8 +434,8 @@ df_tot_eqt_long <- df_tot_eqt_long %>%
                                     "bisection",
                                     "bisection_asym",
                                     "bonf_bisec",
-                                    "percentile_bt1",
                                     "percentile_bt_gemini",
+                                    "percentile_bt1",
                                     "bayesian_mcmc_cauchy_mean", 
                                     "bayesian_mcmc_cauchy_marg", 
                                     "bayesian_mcmc_cauchy_scs",
@@ -447,77 +446,80 @@ df_tot_eqt_long <- df_tot_eqt_long %>%
                                     "bayesian_mcmc_beta_marg",
                                     "bayesian_mcmc_beta_scs"))
 
+# 1. Get the base colors from RColorBrewer (use the maximum allowed, which is 11 for "BrBG")
 base_brbg_palette <- brewer.pal(n = 11, name = "BrBG")
 base_brbg_palette <- brewer.pal(n = 11, name = "RdBu")
 base_brbg_palette <- brewer.pal(n = 11, name = "Spectral")
 base_brbg_palette <- brewer.pal(n = 11, name = "RdYlGn")
 base_brbg_palette <- brewer.pal(n = 11, name = "RdYlBu")
 
+# 2. Create a function that can generate a smooth palette from these base colors
 color_ramp_brbg <- colorRampPalette(base_brbg_palette)
 
+# 3. Generate a larger number of colors (e.g., 100) for a very smooth gradient
 precise_palette <- color_ramp_brbg(100)
 pal <- wes_palette("Zissou1", 100, type = "continuous")
 ## Equal Tails Plot -------------------------------------------------------
 
 eqt_lu_facet_levels <- levels(factor(df_tot_eqt_long$base_method))
 
+# Data for the horizontal line in the 'lower' plot
 hline_data_l <- df_tot_eqt_long %>% 
   filter(grepl(pattern, base_method)) %>%
   #filter(base_method %in% eqt_lu_facet_levels[1:6]) %>%
-  distinct(phi, base_method) %>%
-  mutate(y_intercept = 1 - 0.05 / 3 / 2) 
+  distinct(phi, base_method) %>% # Get unique combinations of facet variables
+  mutate(y_intercept = 1 - 0.05 / 3 / 2) # Add the y-intercept value
 
+# Data for the horizontal line in the 'lower' plot
 hline_data_u <- df_tot_eqt_long %>%
   filter(grepl(pattern, base_method)) %>%
   #filter(base_method %in% eqt_lu_facet_levels[7:12]) %>%
-  distinct(phi, base_method) %>% 
-  mutate(y_intercept = 1 - 0.05 / 3 / 2) 
+  distinct(phi, base_method) %>% # Get unique combinations of facet variables
+  mutate(y_intercept = 1 - 0.05 / 3 / 2) # Add the y-intercept value
+
 
 plot_eqt_l <- df_tot_eqt_long %>% 
-  filter(grepl(pattern, base_method)) %>% 
+  filter(grepl(pattern, base_method))  %>% 
   filter(C == 3) %>%
-  ggplot(aes(x = minpn, y = eqt_l)) +
-  geom_point(aes(color = prob, shape = factor(k)), size = 1) +
-  ggh4x::facet_nested(
-    phi ~ "Lower Border" + base_method,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      base_method = new_eqt_labels
-    )
-  ) +
+  #filter(base_method %in% eqt_lu_facet_levels[1:6])%>%
+  ggplot(aes(x=log10(minpnk), y = eqt_l))+ 
+  geom_point(aes(color = prob), size = 1)+
+  ggh4x::facet_nested( phi ~ "Lower Border" + base_method, 
+    labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+    base_method = new_eqt_labels))+
+  # facet_grid(phi ~ method, labeller = labeller(method = new_eqtails_labels))+ 
+  # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ 
   geom_hline(data = hline_data_l, aes(yintercept = y_intercept)) +
-  scale_x_log10() +
+  #scale_color_viridis_d()+
+  #scale_color_gradientn(colors = precise_palette)+
   scale_color_gradientn(colours = pal) +
   theme_bw(base_size = my_base_size) +
-  theme(
-    axis.text.x = element_blank(),
-    axis.title.x = element_blank()
-  ) +
-  coord_cartesian(ylim = c(0.9, NA)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())+
+  ylim(0.9, NA) +
   ylab("Marginal Coverage Probability") +
-  labs(colour = expression(paste("Category Probabilities ", pi[c])), shape = "No. of clusters (k)")
+  labs( colour =  expression(paste("Category Probabilities ", (pi[c]))))
 
 plot_eqt_u <- df_tot_eqt_long %>% 
-  filter(grepl(pattern, base_method)) %>% 
+  filter(grepl(pattern, method))  %>% 
   filter(C == 3) %>%
-  ggplot(aes(x = minpn, y = eqt_u)) +
-  geom_point(aes(color = prob, shape = factor(k)), size = 1) +
-  ggh4x::facet_nested(
-    phi ~ "Upper Border" + base_method,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      base_method = new_eqt_labels
-    )
-  ) +
+  #filter(method %in% eqt_lu_facet_levels[7:12])%>%
+  ggplot(aes(x=log10(minpnk), y = eqt_u))+ 
+  geom_point(aes(color = prob),size = 1)+
+  ggh4x::facet_nested( phi ~ "Upper Border" + base_method, 
+    labeller = labeller(phi =  function(value) parse(text = paste0("\u03A6 = ", value)),
+    base_method = new_eqt_labels))+
+  #facet_grid(phi ~ method, labeller = labeller(method = new_eqtails_labels))+ 
+  #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ 
   geom_hline(data = hline_data_u, aes(yintercept = y_intercept)) +
-  scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
-  ) +
-  scale_color_gradientn(colours = pal) +
+  #scale_color_viridis_d()+
+  #scale_color_gradientn(colors = precise_palette)+
+  scale_color_gradientn(colours = pal)+
   theme_bw(base_size = my_base_size) +
-  coord_cartesian(ylim = c(0.9, NA)) +
+  ylim(0.9, NA) +
+  xlab(expression(paste(log10(min( (pi[c]*n*K) ))))) +
   ylab("Marginal Coverage Probability") +
-  labs(colour = expression(paste("Category Probabilities ", pi[c])), shape = "No. of clusters (k)")
+  labs( colour =  expression(paste("Category Probabilities ", (pi[c]))))
 
 
 plot_eqt_lu_split <- plot_eqt_l / plot_eqt_u + 
@@ -526,7 +528,6 @@ plot_eqt_lu_split <- plot_eqt_l / plot_eqt_u +
 plot_eqt_lu_split
 
 # --- Save ---
-# Figure 2 in Manuscript
 ggsave("./Figures/plot_eqt_lu_all.png",
        plot = plot_eqt_lu_split,
        width = 7,       # Full text width
@@ -535,7 +536,7 @@ ggsave("./Figures/plot_eqt_lu_all.png",
        dpi = 900)      
 
 ## Asymmetry Plot ---------------------------------------------------------
-# Not used in Manuscript
+
 # Create the plot
 asymmetry_plot <- df_tot_asymmetry %>% 
   filter(grepl(pattern, base_method)) %>%
@@ -580,8 +581,12 @@ ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\
        width = 10, height = 8,
        dpi = 900)
 
+
+
+
+
 ### Tryouts ---------------------------------------------------------------
-# Not used in Manuscripts
+
 # First, create a summary data frame
 df_tot_covprob_summary <- df_tot_covprob_long %>%
   # Group by the variables you want on your axes and facets
