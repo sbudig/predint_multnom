@@ -6,11 +6,10 @@ library(here)
 library(ggsci)
 library(wesanderson)
 
-setwd(here())
-#setwd(r"(B:\Budig\Phd\predint_mult\Code_and_Data)")
-#setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
-#setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Code\Code_and_Data)")
-setwd(r"(C:\Users\Budig\Google_Drive\Uni\Phd\03_Predint_multinomial\Manuskript\Raw\Code_and_Data)")
+# set working directory to Code and Data
+# setwd("/Code_and_Data")
+
+
 # Explanation of variables ------------------------------------------------
 
 # This script processes simulation results from .rds files. It calculates coverage
@@ -44,9 +43,9 @@ COVERAGE_METHODS <- c(
 
 
 
-result_dirs <- c(".\\Results\\intermediate_results\\threecats\\",
-                 ".\\Results\\intermediate_results\\fivecats\\",
-                 ".\\Results\\intermediate_results\\tencats\\"
+result_dirs <- c(".\\Code_and_Data\\Results\\intermediate_results\\threecats\\",
+                 ".\\Code_and_Data\\Results\\intermediate_results\\fivecats\\",
+                 ".\\Code_and_Data\\Results\\intermediate_results\\tencats\\"
 )
 
 # Load and Summarize Data in a Single Step -----------------------------
@@ -274,6 +273,8 @@ plot_covprob_all
 ### Splitted in 2 parts ---------------------------------------------------
 # Used in Manuscript Figure 1
 
+#write.csv(df_tot_covprob_long, "predint_covprob.csv", row.names = FALSE)
+
 # Get the names of your facet levels in their current order
 facet_levels <- levels(factor(df_tot_covprob_long$covprob_type))
 
@@ -293,10 +294,11 @@ plot_covprob_top <- df_tot_covprob_long %>%
   geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
   geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
   scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
+    name = expression(paste(min((pi[c] * n)))),
+    labels = scales::label_number(drop0trailing = TRUE)
   ) +
   coord_cartesian(ylim = c(0.75, 1)) +
-  ylab("Coverage Probability") +
+  ylab("Simultaneous Coverage Probability") +
   labs(colour = "No. of categories (C)", shape = "No. of clusters (k)") +
   theme_bw(base_size = my_base_size) +
   theme(
@@ -321,10 +323,11 @@ plot_covprob_bottom <- df_tot_covprob_long %>%
   geom_hline(yintercept = 0.95 + sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
   geom_hline(yintercept = 0.95 - sqrt(0.95 * (1 - 0.95) / 1000), linetype = "dashed") +
   scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
+    name = expression(paste(min((pi[c] * n)))),
+    labels = scales::label_number(drop0trailing = TRUE)
   ) +
   coord_cartesian(ylim = c(0.75, 1)) +
-  ylab("Coverage Probability") +
+  ylab("Simultaneous Coverage Probability") +
   labs(colour = "No. of categories (C)", shape = "No. of clusters (k)") +
   theme_bw(base_size = my_base_size) +
   scale_color_manual(values = cols_categories, name = "No. of categories (C)")
@@ -338,12 +341,13 @@ plot_covprob_all_split
 
 # --- Save --- 
 # Figure 1 in Manuscript
-ggsave("./Figures/plot_covprob_all.png",
+ggsave("./Code_and_Data/Figures/Budig_predint_multnom_Figure_1.pdf",
        plot = plot_covprob_all_split,
-       width = 7,       # Full text width
-       height = 9,      # Max text height
-       units = "in",
-       dpi = 900)      
+       width = 16,       # Full text width
+       height = 18,      # Max text height
+       units = "cm",
+       device = cairo_pdf
+      )         
 
 
 # Only three categories
@@ -367,7 +371,7 @@ plot_covprob_top <- df_tot_covprob_long %>%
     name = expression(paste(min((pi[c] * n))))
   ) +
   coord_cartesian(ylim = c(0.75, 1)) +
-  ylab("Coverage Probability") +
+  ylab("Simultaneous Coverage Probability") +
   labs(colour = "No. of clusters (k)") +
   theme_bw(base_size = my_base_size) +
   theme(
@@ -479,16 +483,24 @@ plot_eqt_l <- df_tot_eqt_long %>%
   ggplot(aes(x = minpn, y = eqt_l)) +
   geom_point(aes(color = prob, shape = factor(k)), size = 1) +
   ggh4x::facet_nested(
-    phi ~ "Lower Border" + base_method,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      base_method = new_eqt_labels
-    )
-  ) +
+  phi ~ "Lower Border" + base_method,
+  labeller = labeller(
+    phi = function(value) parse(text = paste0("\u03A6 = ", value)),
+    base_method = new_eqt_labels
+  ),
+  strip = ggh4x::strip_nested(
+    text_x = list(
+      element_text(size = 7.2)    # Method names
+    ),
+    by_layer_x = TRUE
+  )
+) +
   geom_hline(data = hline_data_l, aes(yintercept = y_intercept)) +
-  scale_x_log10() +
+ scale_x_log10(
+    labels = scales::label_number(drop0trailing = TRUE)
+  ) +
   scale_color_gradientn(colours = pal) +
-  theme_bw(base_size = my_base_size) +
+  theme_bw(base_size = 10) +
   theme(
     axis.text.x = element_blank(),
     axis.title.x = element_blank()
@@ -503,18 +515,25 @@ plot_eqt_u <- df_tot_eqt_long %>%
   ggplot(aes(x = minpn, y = eqt_u)) +
   geom_point(aes(color = prob, shape = factor(k)), size = 1) +
   ggh4x::facet_nested(
-    phi ~ "Upper Border" + base_method,
-    labeller = labeller(
-      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
-      base_method = new_eqt_labels
-    )
-  ) +
+  phi ~ "Upper Border" + base_method,
+  labeller = labeller(
+    phi = function(value) parse(text = paste0("\u03A6 = ", value)),
+    base_method = new_eqt_labels
+  ),
+  strip = ggh4x::strip_nested(
+    text_x = list(
+      element_text(size = 7.2)    # Method names
+    ),
+    by_layer_x = TRUE
+  )
+) +
   geom_hline(data = hline_data_u, aes(yintercept = y_intercept)) +
   scale_x_log10(
-    name = expression(paste(min((pi[c] * n))))
+    name = expression(paste(min((pi[c] * n)))),
+    labels = scales::label_number(drop0trailing = TRUE)
   ) +
   scale_color_gradientn(colours = pal) +
-  theme_bw(base_size = my_base_size) +
+  theme_bw(base_size = 10) +
   coord_cartesian(ylim = c(0.9, NA)) +
   ylab("Marginal Coverage Probability") +
   labs(colour = expression(paste("Category Probabilities ", pi[c])), shape = "No. of clusters (k)")
@@ -527,12 +546,70 @@ plot_eqt_lu_split
 
 # --- Save ---
 # Figure 2 in Manuscript
-ggsave("./Figures/plot_eqt_lu_all.png",
-       plot = plot_eqt_lu_split,
-       width = 7,       # Full text width
-       height = 8.4,      # Max text height
-       units = "in",
-       dpi = 900)      
+# ggsave("./Code_and_Data/Figures/Budig_predint_multnom_Figure_2.pdf",
+#       plot = plot_eqt_lu_split,
+#       width = 16,       # Full text width
+#       height = 18,      # Max text height
+#       units = "cm",
+#       device = cairo_pdf )      
+     
+# Alternative (used in manuscript)
+
+# Combine eqt_l and eqt_u into a long 'border' column
+df_eqt_combined <- df_tot_eqt_long %>% 
+  filter(grepl(pattern, base_method), C == 3) %>%
+  pivot_longer(
+    cols = c(eqt_l, eqt_u),
+    names_to = "border",
+    values_to = "coverage_prob"
+  ) %>%
+  mutate(
+    border = factor(border, 
+                    levels = c("eqt_l", "eqt_u"), 
+                    labels = c("Lower Border", "Upper Border"))
+  )
+
+# Single reference line dataset
+hline_data <- df_eqt_combined %>% 
+  distinct(phi, base_method, border) %>% 
+  mutate(y_intercept = 1 - 0.05 / 3 / 2)
+
+
+plot_eqt_lu_split2 <- ggplot(df_eqt_combined, aes(x = minpn, y = coverage_prob)) +
+  geom_point(aes(color = prob, shape = factor(k)), size = 1) +
+  geom_hline(data = hline_data, aes(yintercept = y_intercept)) +
+  ggh4x::facet_nested(
+    border + phi ~ base_method,  # Moves border to the row strips
+    labeller = labeller(
+      phi = function(value) parse(text = paste0("\u03A6 = ", value)),
+      base_method = new_eqt_labels
+    ),
+    strip = ggh4x::strip_nested(
+      text_x = list(element_text(size = 7.2)),
+      by_layer_y = TRUE
+    )
+  ) +
+  scale_x_log10(
+    name = expression(paste(min((pi[c] * n)))),
+    labels = scales::label_number(drop0trailing = TRUE)
+  ) +
+  scale_color_gradientn(colours = pal) +
+  coord_cartesian(ylim = c(0.9, NA)) +
+  ylab("Marginal Coverage Probability") +
+  labs(
+    colour = expression(paste("Category Probabilities ", pi[c])),
+    shape = "No. of clusters (k)"
+  ) +
+  theme_bw(base_size = 10) +
+  theme(legend.position = "bottom")
+
+ggsave("./Code_and_Data/Figures/Budig_predint_multnom_Figure_2.pdf",
+       plot = plot_eqt_lu_split2,
+       width = 16,       # Full text width
+       height = 18,      # Max text height
+       units = "cm",
+       device = cairo_pdf )      
+      
 
 ## Asymmetry Plot ---------------------------------------------------------
 # Not used in Manuscript

@@ -116,36 +116,56 @@ f_calc_se_pred <- function(var_y, var_y_hat){
 
 # n: single integer or vector of integers, cluster size
 #  the multinomial sample size for the individual multinomial vectors to generate
-#  if vector: recycled to have length n
+#  recycled to have length k
 
 # v_pi_c: vector of probabilities, length (v_pi_c) must be = no. of categories
 #  pi should sum to 1, pi is rescaled such that it really sums to 1 
 
 # catnam: name of categories, should equal length v_pi vector
 
-f_rdirmultinom <- function(v_pi, phi, k, n, catnam = NULL) {
+
+f_phi2asum <- function(phi, n) {
+  # Ensure phi is valid for overdispersion
+  if (any(phi <= 1)) {
+    stop("Overdispersion parameter phi must be > 1.")
+  }
+  # Ensure n is valid
+  if (any(n <= phi)) {
+    warning("For some clusters, n < phi, which would lead to negative alpha.
+             These will be floored at a small positive value.")
+    n <- pmax(n, phi + 1) # Ensure n is slightly larger than phi
+  }
   
-  v_size <- rep(n, length.out = k)
+  asum <- (n - phi) / (phi - 1)
+  return(asum)
+}
+
+f_rdirmultinom <- function(v_pi, k, n, phi, catnam = NULL) {
+  
+  v_size <- rep_len(n, k)
+  
   v_props <- v_pi / sum(v_pi)
-  asum <- (phi - n) / (1 - phi)
-  v_alpha <- asum * v_props
-  m_propdir <- rdirichlet(n = k, alpha = v_alpha)
+  v_asum <- f_phi2asum(phi = phi, n = v_size)
   
-  m_dat <- t(apply(
-    X = cbind(v_size, m_propdir),
-    MARGIN = 1,
-    FUN = function(x) {
-      rmultinom(n = 1,
-                size = x[1],
-                prob = x[-1])
-    }
-  ))
+  # Generate Dirichlet-distributed probability vectors for each cluster
+  # Each row corresponds to a cluster and has a different alpha_sum
+  m_propdir <- matrix(NA, nrow = k, ncol = length(v_props))
+  for (i in 1:k) {
+    v_alpha <- v_asum[i] * v_props
+    m_propdir[i, ] <- rdirichlet(n = 1, alpha = v_alpha)
+  }
+  
+  # Generate multinomial counts for each cluster
+  m_dat <- t(sapply(1:k, function(i) {
+    rmultinom(n = 1, size = v_size[i], prob = m_propdir[i, ])
+  }))
   
   if (!is.null(catnam)) {
     colnames(m_dat) <- catnam
   }
   
   return(m_dat)
+  
 }
 
 ## Fit a multinomial model function ----------------------------------------
@@ -1066,81 +1086,81 @@ f_construct_simultaneous_pi <- function(post_pred_samples, alpha) {
   return(data.frame(lower, upper))
 }
 
+
 # Data --------------------------------------------------------------------
-
-
-setwd(r"(C:\Users\c3rnf\Meine Ablage\Uni\Phd\03_Predint_multinomial\Manuskript\Raw\Code_and_Data\Code\Example_Analysis)")
-
-
+# Run from the manuscript root or the Code_and_Data directory.
 set.seed(24)
 
-df_dart <- read.csv2("df_dart.csv")
+df_lumbar <- read.csv(".\\Code_and_Data\\Code\\Example_Analysis\\df_LumbarCordRadiculoneuropathy2.csv") %>%
+  filter(Application == "diet")
 
-df_dart <- df_dart %>% rowwise() %>% mutate(Total = sum(c_across(Live_Fetuses:Dead_Fetus))) %>% ungroup() %>% mutate(Study = c(1,seq(1:(nrow(df_dart)-1))))
+# Model the severity distribution among affected animals: Total is the
+# multinomial sample size
+category_order <- c("Minimal", "Slight", "Moderate", "Severe")
 
-df_dart$Trial <- c(rep("Historical", times = 7), "Current")
-
-df_dart_long <- df_dart %>% 
+# The CSV has no study IDs, so number the rows separately within each sex.
+# Matching numbers across sexes do not imply that the groups are paired.
+df_lumbar_long <- df_lumbar %>% 
+  mutate(Study = sprintf("%02d", row_number()), .by = Gender) %>%
   pivot_longer(
-    cols = c(Live_Fetuses, Early_Resorptions, Late_Resorptions, Dead_Fetus), 
+    cols = all_of(category_order), 
     names_to = "Categories"
   ) %>%
   mutate(Proportion = value/Total)
 
+df_lumbar_m <- filter(df_lumbar, Gender == "Male")
+df_lumbar_f <- filter(df_lumbar, Gender == "Female")
+
 # Plots -------------------------------------------------------------------
 
-plot_dart_trial <- df_dart_long %>%
-  mutate(Trial = fct_relevel(Trial, "Historical", "Current")) %>%
+plot_lumbar <- df_lumbar_long %>%
   ggplot(
     aes(x = Categories)
   ) +
   geom_jitter(
-    aes(y = log10(value+1), color = factor(Study)), 
+    aes(y = value), 
     height = 0, 
     width = 0.05,
     size = 4
   ) +
-  facet_grid(~Trial) +
+  facet_grid(~Gender)+
   theme_bw(base_size = 18) +
-  labs(color = "Study", y = "Count", x = "Category")
+  labs(y = "Count", x = "Category")
 
-plot_dart_trial
-
-ggsave("C:\\Users\\Budig\\Google_Drive\\Uni\\Phd\\03_Predint_multinomial\\Code\\Code_and_Data\\Figures\\plot_dart_trial.png",
-       plot = plot_dart_trial,
-       width = 12, height = 8,
-       dpi = 900)
-
+plot_lumbar
 
 
 # Prediction Intervals ----------------------------------------------------
 
-dat_dart_hist <- filter(df_dart, Trial == "Historical")
-dat_dart_curr <- filter(df_dart, Trial == "Current")
+## Male -------------------------------------------------------------------
 
-fit_dart <- vglm(
-  formula = cbind(Early_Resorptions, Late_Resorptions, Dead_Fetus, Live_Fetuses) ~ 1,
+# df_lumbar_m is male dataset
+
+fit_lumbar_m <- vglm(
+  formula = cbind(Slight, Moderate, Severe, Minimal) ~ 1,
   family = multinomial,
   model = TRUE,
-  data = dat_dart_hist
+  data = df_lumbar_m
 )
 
 current_disp <- "afroz"
 
-pi_hat_vec <- f_calc_pi(fit_dart)
-phi_hat <- f_estimate_phi(model = fit_dart, dispersion = current_disp)
+pi_hat_vec <- f_calc_pi(fit_lumbar_m)
+phi_hat <- f_estimate_phi(model = fit_lumbar_m, dispersion = current_disp)
 
 # the total number of observations across all historical studies is calculated.
 # $N_{hist}=\sum_{k=1}^{K}n_k$
-N_hist <- sum(rowSums(dat_dart_hist[c("Early_Resorptions", "Late_Resorptions", "Dead_Fetus", "Live_Fetuses")]))
+N_hist <- sum(rowSums(df_lumbar_m[category_order]))
 
 # number of historical studies
-k_hist <- nrow(dat_dart_hist)
+k_hist <- nrow(df_lumbar_m)
 
-# historical cluster size (takes the maximum of all cluster sizes)
-n_hist <- max(dat_dart_hist$Total)
+# Preserve the observed cluster sizes for the parametric bootstrap.
+n_hist <- df_lumbar_m$Total
 
-m <- dat_dart_curr$Total
+# future cluster size set to 30
+m <- 30
+
 
 # Expected count for each category
 # $\hat{\bm{y}}=(\bm{y}_1,...,\bm{y}_C$
@@ -1486,11 +1506,11 @@ pred_int_stud
 # Bayesian Hierarchical Model ---------------------------------------------
 
 ## Beta Prior -------------------------------------------------------------
-mod_beta <- cmdstan_model("C:\\Users\\c3rnf\\Meine Ablage\\Uni\\Phd\\03_Predint_multinomial\\Manuskript\\Raw\\Code_and_Data\\Code\\dirichlet_multinomial_beta_rho.stan", compile = TRUE)
-mod_beta <- cmdstan_model(here("Code", "dirichlet_multinomial_beta_rho.stan"), compile = TRUE)
+
+mod_beta <- cmdstan_model(".\\Code_and_Data\\Code\\dirichlet_multinomial_beta_rho.stan", compile = TRUE)
 
 pred_int_bayesian_beta <- f_calc_pi_bayesian_mcmc(
-  df_hist = dat_dart_hist[c( "Live_Fetuses","Early_Resorptions", "Late_Resorptions", "Dead_Fetus")],
+  df_hist = df_lumbar_m[category_order],
   m = m,
   alpha = alpha,
   stan_model = mod_beta)
@@ -1500,13 +1520,12 @@ pred_int_bayesian_beta_marg <- pred_int_bayesian_beta$marginal
 pred_int_bayesian_beta_scs <- pred_int_bayesian_beta$scs_rank
 
 ## Half Cauchy Prior ------------------------------------------------------
-mod_cauchy <- cmdstan_model("C:\\Users\\c3rnf\\Meine Ablage\\Uni\\Phd\\03_Predint_multinomial\\Manuskript\\Raw\\Code_and_Data\\Code\\dirichlet_multinomial_cauchy.stan", 
-                            compile = TRUE)
-mod_cauchy <- cmdstan_model(here("Code", "dirichlet_multinomial_cauchy.stan"), 
+
+mod_cauchy <- cmdstan_model(".\\Code_and_Data\\Code\\dirichlet_multinomial_cauchy.stan", 
                             compile = TRUE)
 
 pred_int_bayesian_cauchy <- f_calc_pi_bayesian_mcmc(
-  df_hist = dat_dart_hist[c( "Live_Fetuses","Early_Resorptions", "Late_Resorptions", "Dead_Fetus")],
+  df_hist = df_lumbar_m[category_order],
   m = m,
   alpha = alpha,
   stan_model = mod_cauchy)
@@ -1515,29 +1534,66 @@ pred_int_bayesian_cauchy_mean <- pred_int_bayesian_cauchy$mean_centered
 pred_int_bayesian_cauchy_marg <- pred_int_bayesian_cauchy$marginal
 pred_int_bayesian_cauchy_scs <- pred_int_bayesian_cauchy$scs_rank
 
+# Create manuscript-style table rows for one sex.
+f_create_manuscript_rows <- function(all_intervals, y_hat_vec, include_widths = TRUE) {
+  method_order <- c(
+    "Pointwise", "MVN", "Bonferroni", "Sym. Calibration",
+    "Asym. Calibration", "Marg. Calibration", "Rank-Based SCS",
+    "Max. Abs. Res.", "B: Beta (marg)", "B: Beta (mean)",
+    "B: Beta (SCS)", "B: Cauchy (marg)", "B: Cauchy (mean)",
+    "B: Cauchy (SCS)"
+  )
+  method_labels <- c(
+    "Pointwise", "MVN", "Bonferroni", "Sym. Calibration",
+    "Asym. Calibration", "Marg. Calibration", "Rank-Based SCS",
+    "Max. Abs. Res.", "B: Beta (marginal)", "B: Beta (mean)",
+    "B: Beta (SCS)", "B: Cauchy (marginal)", "B: Cauchy (mean)",
+    "B: Cauchy (SCS)"
+  )
+  names(method_labels) <- method_order
+  y_hat_row <- data.frame(
+    Method = "$\\hat{y}_c$",
+    Minimal = sprintf("%.2f", y_hat_vec[1]),
+    Slight = sprintf("%.2f", y_hat_vec[2]),
+    Moderate = sprintf("%.2f", y_hat_vec[3]),
+    Severe = sprintf("%.2f", y_hat_vec[4]),
+    check.names = FALSE
+  )
+  if (include_widths) {
+    y_hat_row$`Avg. width` <- ""
+  }
+
+  method_rows <- lapply(method_order, function(method_name) {
+    interval_df <- as.data.frame(all_intervals[[method_name]])
+    lower_bound <- pmax(interval_df$lower, 0)
+    upper_bound <- interval_df$upper
+    widths <- upper_bound - lower_bound
+
+    method_row <- data.frame(
+      Method = unname(method_labels[[method_name]]),
+      Minimal = sprintf("[%.2f, %.2f]", lower_bound[1], upper_bound[1]),
+      Slight = sprintf("[%.2f, %.2f]", lower_bound[2], upper_bound[2]),
+      Moderate = sprintf("[%.2f, %.2f]", lower_bound[3], upper_bound[3]),
+      Severe = sprintf("[%.2f, %.2f]", lower_bound[4], upper_bound[4]),
+      check.names = FALSE
+    )
+
+    if (include_widths) {
+      method_row$Minimal <- sprintf("[%.2f, %.2f] {\\itshape %.2f}", lower_bound[1], upper_bound[1], widths[1])
+      method_row$Slight <- sprintf("[%.2f, %.2f] {\\itshape %.2f}", lower_bound[2], upper_bound[2], widths[2])
+      method_row$Moderate <- sprintf("[%.2f, %.2f] {\\itshape %.2f}", lower_bound[3], upper_bound[3], widths[3])
+      method_row$Severe <- sprintf("[%.2f, %.2f] {\\itshape %.2f}", lower_bound[4], upper_bound[4], widths[4])
+      method_row$`Avg. width` <- sprintf("%.2f", mean(widths, na.rm = TRUE))
+    }
+
+    method_row
+  })
+
+  rbind(y_hat_row, do.call(rbind, method_rows))
+}
+
 # Result Table ------------------------------------------------------------
 
-# 3. DEFINE CONSTANTS & INPUTS
-# -------------------------------------------------------------------
-# Define the order for categories and trials
-category_order <- c("Live_Fetuses", "Early_Resorptions", "Late_Resorptions", "Dead_Fetus")
-trial_order    <- c("Historical", "Current")
-
-# Observed/Predicted data for plotting
-y_c_vec <- unname(unlist(dat_dart_curr[, c("Live_Fetuses", "Early_Resorptions", "Late_Resorptions", "Dead_Fetus")]))
-
-# Methods to include in the main plot
-chosen_methods <- c(
-  "Sym. Calibration", "Asym. Calibration", "Marg. Calibration", 
-  "Rank-Based SCS", "Max. Abs. Res.", "B: Cauchy (SCS)"
-)
-
-# Plotting aesthetics
-dodge_width <- 0.6
-
-
-# 4. MASTER DATA PREP: Consolidate all intervals
-# -------------------------------------------------------------------
 # Create a single named list of all interval data frames
 all_intervals <- list(
   `Pointwise` = pred_int_pointwise,
@@ -1557,104 +1613,603 @@ all_intervals <- list(
 
 )
 
-# 5. OUTPUT 1: LaTeX Table (for Supplementary Material)
-# -------------------------------------------------------------------
-# This section creates the wide table with all 10 methods
-formatted_list <- lapply(all_intervals, function(df) {
-  df <- as.data.frame(df)
-  lower_bound <- pmax(df$lower, 0)
-  upper_bound <- df$upper
-  sprintf("[%.2f, %.2f]", lower_bound, upper_bound)
-})
+# Retain the male results before the shared objects are replaced by the female analysis.
+all_intervals_male <- all_intervals
+y_hat_vec_male <- y_hat_vec
+future_size_male <- m
 
-comparison_table <- as.data.frame(do.call(cbind, formatted_list))
+## Female ------------------------------------------------------------------
 
-# Get row names, or create them
-cat_names <- rownames(all_intervals[[1]])
-if (is.null(cat_names)) {
-  cat_names <- paste("Category", 1:nrow(comparison_table))
+# df_lumbar_f is the female dataset
+
+fit_lumbar_f <- vglm(
+  formula = cbind(Slight, Moderate, Severe, Minimal) ~ 1,
+  family = multinomial,
+  model = TRUE,
+  data = df_lumbar_f
+)
+
+current_disp <- "afroz"
+
+pi_hat_vec <- f_calc_pi(fit_lumbar_f)
+phi_hat <- f_estimate_phi(model = fit_lumbar_f, dispersion = current_disp)
+
+# the total number of observations across all historical studies is calculated.
+# $N_{hist}=\sum_{k=1}^{K}n_k$
+N_hist <- sum(rowSums(df_lumbar_f[category_order]))
+
+# number of historical studies
+k_hist <- nrow(df_lumbar_f)
+
+# Preserve the observed cluster sizes for the parametric bootstrap.
+n_hist <- df_lumbar_f$Total
+
+# future cluster size set to 30
+m <- 30
+
+
+# Expected count for each category
+# $\hat{\bm{y}}=(\bm{y}_1,...,\bm{y}_C$
+y_hat_vec <- f_calc_y_hat(pi_hat_vec, m)
+
+# Variance of future observation
+var_y_vec <- f_calc_var_y(phi_hat, m, pi_hat_vec)
+
+# Variance of the estimated future observation
+var_y_hat_vec <- f_calc_var_y_hat(phi_hat, m, pi_hat_vec, N_hist)
+
+# Prediction standard error for each category for each setting
+se_pred_vec <- f_calc_se_pred(var_y_vec, var_y_hat_vec)
+
+# Number of bootstrap iterations
+B <- 1000
+
+f_parboot <- function(pi_vec, phi, k, n, B, m, N_hist){
+  
+  current_phi <- phi
+  current_k <- k
+  current_n <- n
+  current_pi <- pi_vec
+  current_m <- m
+  current_N_hist <- N_hist
+  
+  # Pre-allocate lists to store results from each bootstrap iteration
+  pi_star_hat_b_list <- vector("list", B)
+  phi_star_hat_b_list <- vector("list", B)
+  y_star_hat_b_list <- vector("list", B)
+  se_pred_star_b_list <- vector("list", B)
+  y_star_b_list <- vector("list", B) # For bisection methods
+  
+  for (b in 1:B) {
+    
+    # Initialize a variable to hold the result for this iteration
+    x_star_b <- NULL
+    count_error_mbt <- 0
+    # This loop will continue until x_star_b is successfully assigned a value
+    while (is.null(x_star_b)) {
+      
+      tryCatch({
+        # 1. Generate ONE historical bootstrap sample
+        x_star_b <- as.data.frame(f_rdirmultinom(
+          phi = current_phi,
+          k = current_k,
+          n = current_n,
+          v_pi = current_pi
+        ))
+      }, error = function(e) {
+        # This block is executed ONLY if an error occurs in the code above.
+        # We print a message to the console to stay informed that a retry is happening.
+        message("Main bootstrap x: An error in data generation was caught. Retrying...")
+        count_error_mbt <- count_error_mbt + 1
+        
+        if (count_error_mbt > 10) {
+          message("Main bootstrap x: Ten errors occurred and were caught. Retrying with phi*0.99")
+          current_phi_n <- current_phi_n*0.99
+        }
+        # By not assigning anything to x_star_b here, the variable remains NULL,
+        # ensuring the while-loop runs again.
+      })
+    }
+    
+    # Handle all-zero columns
+    for (col in colnames(x_star_b)) {
+      if (all(x_star_b[[col]] == 0)) {
+        x_star_b[[sample(nrow(x_star_b), 1), col]] <- 1
+      }
+    }
+    
+    # 2. Fit model to the bootstrap sample
+    model_x_star <- f_fit_mult(df_i = x_star_b, modeltype = "multinomial")
+    
+    if (!is.null(model_x_star[[1]])) {
+      # 3. Calculate bootstrap statistics
+      pi_star_hat_b <- f_calc_pi(model_x_star[[1]])
+      phi_star_hat_b <- f_estimate_phi(model = model_x_star[[1]], dispersion = current_disp)
+      
+      pi_star_hat_b_list[[b]] <- pi_star_hat_b
+      phi_star_hat_b_list[[b]] <- phi_star_hat_b
+      
+      y_star_hat_b_list[[b]] <- f_calc_y_hat(pi_star_hat_b, current_m)
+      se_pred_star_b_list[[b]] <- f_calc_se_pred_star_internal(phi_star_hat_b, pi_star_hat_b, current_m, current_N_hist)
+      
+      # 4. Generate ONE future bootstrap sample 
+      y_star_b <- NULL
+      count_error_mbty <- 0
+      
+      # This loop will continue until y_star_b is successfully assigned a value
+      while (is.null(y_star_b)) {
+        tryCatch({
+          y_star_b <- as.data.frame(f_rdirmultinom(
+            phi = current_phi,
+            v_pi = current_pi,
+            k = 1,
+            n = current_m
+          ))
+        }, error = function(e) {
+          # This block is executed ONLY if an error occurs in the code above.
+          # We print a message to the console to stay informed that a retry is happening.
+          message("Main bootstrap y: An error in data generation was caught. Retrying...")
+          count_error_mbty <- count_error_mbty + 1
+          
+          if (count_error_mbty > 10) {
+            message("Main bootstrap y: Ten errors occurred and were caught. Retrying with phi*0.99")
+            current_phi_m <- current_phi_m*0.99
+          }
+          
+          # By not assigning anything to x_star_b here, the variable remains NULL,
+          # ensuring the while-loop runs again.
+        })
+      }
+      
+      y_star_b_list[[b]] <- y_star_b
+      
+    }
+    # The large objects 'x_star_b' and 'model_x_star' are discarded at the end of the loop
+  }
+  
+  # Return a list of all calculated bootstrap results for this setting
+  return(list(
+    pi_star_hat_b_vec = pi_star_hat_b_list,
+    phi_star_hat_b = phi_star_hat_b_list,
+    y_star_hat_b_vec = y_star_hat_b_list,
+    se_pred_star_b_vec = se_pred_star_b_list,
+    y_star_b_vec = y_star_b_list
+  ))
 }
 
-# Add category names and predicted means
-comparison_table <- data.frame(
-  Category = cat_names,
-  y_hat = y_hat_vec, # Using 'y_hat_vec' from assumptions
-  comparison_table
+bootstrap_results <- f_parboot(pi_hat_vec, phi_hat, k_hist, n_hist, B, m, N_hist)
+
+# Unpack the results into the list structures your existing code expects
+pi_star_hat_b_vec <- bootstrap_results[["pi_star_hat_b_vec"]]
+phi_star_hat_b <- bootstrap_results[["phi_star_hat_b"]]
+y_star_hat_b_vec <- bootstrap_results[["y_star_hat_b_vec"]]
+se_pred_star_b_vec <-  bootstrap_results[["se_pred_star_b_vec"]]
+y_star_b_vec <- bootstrap_results[["y_star_b_vec"]]
+
+# set alpha level
+alpha <- 0.05
+
+# set alternative
+alternative <- "both"
+
+## Pointwise Normal Approximation -----------------------------------------
+# use Pointwise Normal Approximation to compute prediction intervals
+
+# calculate vector of quantiles depending on respective alphas
+v_q_norm <- qnorm((1 - alpha / 2))
+
+# calculate pointwise prediction intervals
+pred_int_pointwise <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = v_q_norm,
+  se_pred = se_pred_vec,
+  alternative = alternative
 )
 
-# Generate xtable object
-xtable_obj <- xtable(comparison_table,
-                     caption = "Comparison of Simultaneous Prediction Intervals by Method",
-                     label = "tab:pi_comparison",
-                     align = c("c", "l", "r", rep("c", 14)) # l(eft), r(ight), c(enter)
+pred_int_pointwise
+
+
+# Multivariate Normal Approximation ---------------------------------------
+
+q_mvn <- f_calc_q_mvn(
+  phi_hat = phi_hat,
+  pi_hat = pi_hat_vec,
+  m = m,
+  N_hist = N_hist,
+  alpha = alpha)
+
+# calculate prediction intervals with MVN-adjusted q
+pred_int_mvn <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = q_mvn,
+  se_pred = se_pred_vec,
+  alternative = alternative
 )
 
-# Print LaTeX code to console
-print(xtable_obj,
-      include.rownames = FALSE,
-      booktabs = TRUE,
-      caption.placement = "top",
-      comment = FALSE
+pred_int_mvn
+
+## Bonferroni Adjustment --------------------------------------------------
+# use Bonferroni Adjustment to compute prediction intervals
+
+# list with elements of number of categories
+n_cat <- length(y_hat_vec)
+
+q_norm <- f_adjust_q(n_cat, alpha)
+
+# calculate pointwise prediction intervals
+pred_int_bonf <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = q_norm,
+  se_pred = se_pred_vec,
+  alternative = alternative
 )
 
+pred_int_bonf
 
-# 6. OUTPUT 2: Main Manuscript Plot (plot_combined_clean)
-# -------------------------------------------------------------------
 
-# 6.1. Create 'plot_data': The master long-format data for all intervals
-plot_data_list <- lapply(names(all_intervals), function(method_name) {
-  df <- as.data.frame(all_intervals[[method_name]])
-  data.frame(
-    Method = method_name,
-    Category = factor(category_order, levels = category_order),
-    Lower = pmax(df$lower, 0), # Apply 0-bound
-    Upper = df$upper,
-    y_hat_c = y_hat_vec,
-    y_c = y_c_vec
+## Symmetrical Bisection --------------------------------------------------
+# use Symmetrical Bisection to compute prediction intervals
+
+# calibrate q with bisection
+q_calib_sym <- f_bisection(
+  y_star_hat = y_star_hat_b_vec,
+  se_pred = se_pred_star_b_vec,
+  y_star = y_star_b_vec,
+  alternative = alternative,
+  quant_min = 0.01,
+  quant_max = 10,
+  n_bisec = 100,
+  tol = 1e-3,
+  alpha = alpha,
+)
+
+# calculate pointwise prediction intervals
+pred_int_bisection_sym <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = q_calib_sym,
+  se_pred = se_pred_vec,
+  alternative = alternative
+)
+
+pred_int_bisection_sym
+
+
+# Asymmetrical Bisection --------------------------------------------------
+
+# calibrate q with bisection for lower border
+alpha_calib_asym_lower <- f_bisection(
+  y_star_hat = y_star_hat_b_vec,
+  se_pred = se_pred_star_b_vec,
+  y_star = y_star_b_vec,
+  quant_min = 0.01,
+  quant_max = 10,
+  n_bisec = 100,
+  tol = 1e-3,
+  alpha = alpha / 2,
+  alternative = "lower"
+)
+
+# calibrate q with bisection for upper boarder
+alpha_calib_asym_upper <- f_bisection(
+  y_star_hat = y_star_hat_b_vec,
+  se_pred = se_pred_star_b_vec,
+  y_star = y_star_b_vec,
+  quant_min = 0.01,
+  quant_max = 10,
+  n_bisec = 100,
+  tol = 1e-3,
+  alpha = alpha / 2,
+  alternative = "upper"
+)
+
+q_calib_asym <- c(alpha_calib_asym_lower, alpha_calib_asym_upper)
+
+# calculate prediction intervals with calibrated q
+pred_int_bisection_asym <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = q_calib_asym,
+  se_pred = se_pred_vec,
+  alternative = alternative
+)
+
+pred_int_bisection_asym
+
+
+# Bonferroni Bisection ----------------------------------------------------
+
+# list with elements of number of categories
+
+alpha_calib_bonf_bisec <- f_single_bisec(
+  n_cat = length(y_hat_vec),
+  y_star_hat = y_star_hat_b_vec,
+  se_pred = se_pred_star_b_vec,
+  y_star = y_star_b_vec,
+  quant_min = 0.01,
+  quant_max = 10,
+  n_bisec = 100,
+  tol = 1e-3,
+  alpha = alpha,
+  alternative = "both"
+)
+
+# calculate prediction intervals with bonferroni adjusted q
+pred_int_bonf_bisec <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = alpha_calib_bonf_bisec,
+  se_pred = se_pred_vec,
+  alternative = alternative
+)
+
+pred_int_bonf_bisec
+
+# SCS Rank ----------------------------------------------------------------
+
+df_zc <- f_calc_zc_main(
+  l_y_star = y_star_b_vec,
+  l_y_star_hat = y_star_hat_b_vec,
+  l_se = se_pred_star_b_vec,
+  n_cat = length(y_hat_vec)
+)
+
+scs_zc <- abs(SCSrank(as.matrix(df_zc))$conf.int)
+
+# calculate prediction intervals with rectangular simultaneous confidence set
+pred_int_scsrank <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = scs_zc,
+  se_pred = se_pred_vec,
+  alternative = alternative
+)
+
+pred_int_scsrank
+
+# Studentized Bootstrap ---------------------------------------------------
+
+df_zc <- f_calc_zc_main(
+  l_y_star = y_star_b_vec,
+  l_y_star_hat = y_star_hat_b_vec,
+  l_se = se_pred_star_b_vec,
+  n_cat = length(y_hat_vec)
+)
+
+# For each bootstrap replication (row), find the maximum absolute standardized residual.
+max_abs_residuals <- apply(abs(df_zc), 1, max)
+
+# The critical value 'q' is the (1-alpha) quantile of this distribution of maximums.
+q_val <- quantile(max_abs_residuals, probs = 1 - alpha, na.rm = TRUE)
+
+
+# Calculate prediction intervals with the new single critical value q
+pred_int_stud <- f_calc_prediction_interval(
+  y_hat = y_hat_vec,
+  q = q_val,
+  se_pred = se_pred_vec,
+  alternative = alternative
+)
+
+pred_int_stud
+
+# Bayesian Hierarchical Model ---------------------------------------------
+
+## Beta Prior -------------------------------------------------------------
+mod_beta <- cmdstan_model(".\\Code_and_Data\\Code\\dirichlet_multinomial_beta_rho.stan", 
+                          compile = TRUE)
+
+pred_int_bayesian_beta <- f_calc_pi_bayesian_mcmc(
+  df_hist = df_lumbar_f[category_order],
+  m = m,
+  alpha = alpha,
+  stan_model = mod_beta)
+
+pred_int_bayesian_beta_mean <- pred_int_bayesian_beta$mean_centered
+pred_int_bayesian_beta_marg <- pred_int_bayesian_beta$marginal
+pred_int_bayesian_beta_scs <- pred_int_bayesian_beta$scs_rank
+
+## Half Cauchy Prior ------------------------------------------------------
+mod_cauchy <- cmdstan_model(".\\Code_and_Data\\Code\\dirichlet_multinomial_cauchy.stan", 
+                            compile = TRUE)
+
+pred_int_bayesian_cauchy <- f_calc_pi_bayesian_mcmc(
+  df_hist = df_lumbar_f[category_order],
+  m = m,
+  alpha = alpha,
+  stan_model = mod_cauchy)
+
+pred_int_bayesian_cauchy_mean <- pred_int_bayesian_cauchy$mean_centered
+pred_int_bayesian_cauchy_marg <- pred_int_bayesian_cauchy$marginal
+pred_int_bayesian_cauchy_scs <- pred_int_bayesian_cauchy$scs_rank
+
+# Result Table ------------------------------------------------------------
+
+# Create a single named list of all interval data frames
+all_intervals <- list(
+  `Pointwise` = pred_int_pointwise,
+  `MVN` = pred_int_mvn,
+  `Bonferroni` = pred_int_bonf,
+  `Sym. Calibration` = pred_int_bisection_sym,
+  `Asym. Calibration` = pred_int_bisection_asym,
+  `Marg. Calibration` = pred_int_bonf_bisec,
+  `Rank-Based SCS` = pred_int_scsrank,
+  `Max. Abs. Res.` = pred_int_stud,
+  `B: Beta (mean)` = pred_int_bayesian_beta_mean,
+  `B: Beta (marg)` = pred_int_bayesian_beta_marg,
+  `B: Beta (SCS)` = pred_int_bayesian_beta_scs,
+  `B: Cauchy (mean)` = pred_int_bayesian_cauchy_mean,
+  `B: Cauchy (marg)` = pred_int_bayesian_cauchy_marg,
+  `B: Cauchy (SCS)` = pred_int_bayesian_cauchy_scs
+  
+)
+
+# Retain the female results for the combined plot.
+all_intervals_female <- all_intervals
+y_hat_vec_female <- y_hat_vec
+future_size_female <- m
+
+# Produce manuscript tables with and without interval widths.
+female_table_rows_with_widths <- f_create_manuscript_rows(
+  all_intervals = all_intervals_female,
+  y_hat_vec = y_hat_vec_female,
+  include_widths = TRUE
+)
+male_table_rows_with_widths <- f_create_manuscript_rows(
+  all_intervals = all_intervals_male,
+  y_hat_vec = y_hat_vec_male,
+  include_widths = TRUE
+)
+comparison_table_with_widths <- rbind(
+  female_table_rows_with_widths,
+  male_table_rows_with_widths
+)
+
+female_table_rows <- f_create_manuscript_rows(
+  all_intervals = all_intervals_female,
+  y_hat_vec = y_hat_vec_female,
+  include_widths = FALSE
+)
+male_table_rows <- f_create_manuscript_rows(
+  all_intervals = all_intervals_male,
+  y_hat_vec = y_hat_vec_male,
+  include_widths = FALSE
+)
+comparison_table_without_widths <- rbind(female_table_rows, male_table_rows)
+
+frequentist_method_count <- 8
+female_row_count <- nrow(female_table_rows)
+male_start_row <- female_row_count
+female_bayesian_start <- 1 + frequentist_method_count
+male_frequentist_start <- male_start_row + 1
+male_bayesian_start <- male_start_row + 1 + frequentist_method_count
+
+f_make_table_section_commands <- function(column_count) {
+  section <- function(text) {
+    paste0("\\multicolumn{", column_count, "}{c}{\\textbf{", text, "}} \\\\ \\midrule\n")
+  }
+
+  list(
+    pos = list(
+      0,
+      1,
+      female_bayesian_start,
+      male_start_row,
+      male_frequentist_start,
+      male_bayesian_start
+    ),
+    command = c(
+      section("Female"),
+      section("Frequentist Methods"),
+      section("Bayesian Methods"),
+      paste0("\\midrule\n", section("Male")),
+      section("Frequentist Methods"),
+      section("Bayesian Methods")
+    )
   )
+}
+
+xtable_obj_with_widths <- xtable(
+  comparison_table_with_widths,
+  caption = paste(
+    "Predicted counts and 95 percent simultaneous prediction intervals for lumbar cord radiculoneuropathy",
+    "for a future control group (m = 30). Italicized values are interval widths; Avg. width is averaged across categories."
+  ),
+  label = "tab:pi_lumbar_comparison_transposed",
+  align = c("r", "l", rep("c", ncol(comparison_table_with_widths) - 1))
+)
+
+print(
+  xtable_obj_with_widths,
+  include.rownames = FALSE,
+  booktabs = TRUE,
+  caption.placement = "top",
+  comment = FALSE,
+  sanitize.text.function = identity,
+  add.to.row = f_make_table_section_commands(ncol(comparison_table_with_widths))
+)
+
+xtable_obj_without_widths <- xtable(
+  comparison_table_without_widths,
+  caption = paste(
+    "Predicted counts and 95 percent simultaneous prediction intervals for lumbar cord radiculoneuropathy",
+    "for a future control group (m = 30)."
+  ),
+  label = "tab:pi_lumbar_comparison_transposed_no_widths",
+  align = c("r", "l", rep("c", ncol(comparison_table_without_widths) - 1))
+)
+
+print(
+  xtable_obj_without_widths,
+  include.rownames = FALSE,
+  booktabs = TRUE,
+  caption.placement = "top",
+  comment = FALSE,
+  sanitize.text.function = identity,
+  add.to.row = f_make_table_section_commands(ncol(comparison_table_without_widths))
+)
+
+# HCD and current-trial prediction intervals by sex -----------------------
+
+category_order <- c("Minimal", "Slight", "Moderate", "Severe")
+gender_order <- c("Female", "Male")
+trial_order <- c("Historical", "Current")
+
+chosen_methods <- c(
+  "Sym. Calibration", "Asym. Calibration", "Marg. Calibration",
+  "Rank-Based SCS", "Max. Abs. Res.", "B: Cauchy (SCS)"
+)
+dodge_width <- 0.6
+study_shapes <- setNames(0:12, sprintf("%02d", seq_len(13)))
+
+interval_results <- list(
+  Male = list(intervals = all_intervals_male, y_hat = y_hat_vec_male),
+  Female = list(intervals = all_intervals_female, y_hat = y_hat_vec_female)
+)
+
+plot_data_list <- lapply(names(interval_results), function(gender) {
+  sex_result <- interval_results[[gender]]
+  do.call(rbind, lapply(names(sex_result$intervals), function(method_name) {
+    interval_df <- as.data.frame(sex_result$intervals[[method_name]])
+    data.frame(
+      Gender = gender,
+      Method = method_name,
+      Category = category_order,
+      Lower = pmax(interval_df$lower, 0),
+      Upper = interval_df$upper,
+      y_hat_c = sex_result$y_hat
+    )
+  }))
 })
 plot_data <- do.call(rbind, plot_data_list)
 
-# 6.2. Prepare 'df_hist': Data for the "Historical" facet
-df_hist <- df_dart_long %>%
-  filter(Trial == "Historical") %>%
+df_hist <- df_lumbar_long %>%
   mutate(
     Categories = factor(Categories, levels = category_order),
-    Trial = factor(Trial, levels = trial_order)
+    Gender = factor(Gender, levels = gender_order),
+    Trial = factor("Historical", levels = trial_order)
   )
 
-# 6.3. Prepare 'df_intervals': Data for the "Current" facet (Intervals)
 df_intervals <- plot_data %>%
   filter(Method %in% chosen_methods) %>%
   mutate(
-    Categories = Category, # Match column name
+    Categories = factor(Category, levels = category_order),
+    Gender = factor(Gender, levels = gender_order),
     Trial = factor("Current", levels = trial_order),
     Method = factor(Method, levels = chosen_methods)
   )
 
-# 6.4. Prepare 'df_current_points': Data for "Current" facet (Points)
 df_current_points <- df_intervals %>%
-  group_by(Categories, Trial) %>%
+  group_by(Gender, Categories, Trial) %>%
   summarize(
-    y_c = first(y_c),
     y_hat_c = first(y_hat_c),
-    .groups = 'drop' # Drop grouping
+    .groups = "drop"
   )
 
-# 6.5. Generate the combined plot
-plot_combined_clean <- ggplot() +
-  
-  # Layer 1: Historical Jitter
-  geom_jitter(
+plot_combined_lumbar <- ggplot() +
+  geom_point(
     data = df_hist,
-    aes(x = Categories, y = value, shape = factor(Study)),
-    height = 0,
-    width = 0.05,
+    aes(x = Categories, y = value, shape = Study, group = Study),
+    position = position_dodge(width = 0.65),
     size = 3,
     color = "gray40"
   ) +
-  
-  # Layer 2: Prediction Intervals (Dodged)
   geom_errorbar(
     data = df_intervals,
     aes(
@@ -1667,142 +2222,141 @@ plot_combined_clean <- ggplot() +
     linewidth = 1.1,
     position = position_dodge(width = dodge_width)
   ) +
-  
-  # Layer 3: Observed Current Count (Central)
-  geom_point(
-    data = df_current_points,
-    aes(x = Categories, y = y_c),
-    shape = 4, # 'X'
-    color = "red",
-    size = 4,
-    stroke = 1.5
-  ) +
-  
-  # Layer 4: Predicted Mean (Central)
   geom_point(
     data = df_current_points,
     aes(x = Categories, y = y_hat_c),
-    shape = 21, # Circle
+    shape = 21,
     fill = "white",
     color = "black",
     size = 3,
     stroke = 1
   ) +
-  
-  # Layer 5: Facets, Theme, and Labels
-facet_grid(
-    ~Trial,
+  facet_grid(
+    Gender ~ Trial,
     scales = "free_x",
     space = "free_x",
-    labeller = as_labeller(c("Historical" = "Historical Control Data", 
-                             "Current" = "Current Trial"))
+    labeller = labeller(
+      Trial = c(
+        "Historical" = "Historical Control Data",
+        "Current" = "Current Trial"
+      )
+    )
+  ) +
+  scale_shape_manual(values = study_shapes) +
+  guides(
+    shape = guide_legend(nrow = 2, byrow = TRUE, order = 1),
+    color = guide_legend(nrow = 2, byrow = TRUE, order = 2)
   ) +
   theme_bw(base_size = 10) +
   labs(
     y = "Count",
-    x = "Category",
-    shape = "Historical Study",
+    x = "Histopathological category",
+    shape = "Historical study (within sex)",
     color = "Prediction Interval Method"
   ) +
   theme(
     legend.position = "bottom",
     legend.box = "vertical"
-  ) +
-  scale_shape_manual(values = 1:10) +
-  guides(shape = "none")+ 
-  scale_y_continuous(
-    trans = "pseudo_log", 
-    breaks = c(0, 1, 2, 5, 10, 25, 50, 100, 250, 500),
-    minor_breaks = NULL
   )
 
+print(plot_combined_lumbar)
 
-print(plot_combined_clean)
+ggsave(
+  file.path(figures_dir, "plot_lumbar_trial.png"),
+  plot = plot_combined_lumbar,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 900
+)
 
-l2ölggsave("./Figures/plot_dart_trial.png",
-       plot = plot_combined_clean,
-       width = 7,       # Full text width
-       height = 5,      # Max text height
-       units = "in",
-       dpi = 900)     
+# HCD and future prediction intervals on the proportion scale -------------
 
-# Alternative 1 -----------------------------------------------------------
+future_sizes <- tibble(
+  Gender = factor(c("Male", "Female"), levels = gender_order),
+  Future_size = c(future_size_male, future_size_female)
+)
 
-# Create the plot
-pi_plot <- ggplot(plot_data, aes(y = Method)) +
-  
-  # Add the prediction interval (as a line range)
-  geom_linerange(aes(xmin = Lower, xmax = Upper), 
-                 linewidth = 1.2, color = "gray50") +
-  
-  # Add the predicted mean (y_hat) as a point
-  geom_point(aes(x = y_hat_c), 
-             shape = 21, size = 2.5, fill = "white", color = "black") +
-  
-  # Add the observed value (y_c) as a red cross
-  geom_point(aes(x = y_c), 
-             shape = 4, size = 3, color = "red", stroke = 1.5) +
-  
-  # --- This is the most important part ---
-  #   Create a separate plot for each Category
-  facet_wrap(~ Category, scales = "free_x") +
-  
-  # --- Theming and Labels ---
+df_intervals_proportion <- df_intervals %>%
+  left_join(future_sizes, by = "Gender") %>%
+  mutate(across(c(Lower, Upper, y_hat_c), ~ .x / Future_size))
+
+df_current_points_proportion <- df_intervals_proportion %>%
+  group_by(Gender, Categories, Trial) %>%
+  summarize(
+    y_hat_c = first(y_hat_c),
+    .groups = "drop"
+  )
+
+plot_combined_lumbar_proportion <- ggplot() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray75") +
+  geom_point(
+    data = df_hist,
+    aes(x = Categories, 
+      y = Proportion, 
+      #shape = Study, 
+      group = Study),
+    position = position_dodge(width = 0.65),
+    size = 3,
+    color = "gray40"
+  ) +
+  geom_errorbar(
+    data = df_intervals_proportion,
+    aes(
+      x = Categories,
+      ymin = Lower,
+      ymax = Upper,
+      color = Method
+    ),
+    width = 0.4,
+    linewidth = 1.1,
+    position = position_dodge(width = dodge_width)
+  ) +
+  geom_point(
+    data = df_current_points_proportion,
+    aes(x = Categories, y = y_hat_c),
+    shape = 21,
+    fill = "white",
+    color = "black",
+    size = 3,
+    stroke = 1
+  ) +
+  facet_grid(
+    Gender ~ Trial,
+    scales = "free_x",
+    space = "free_x",
+    labeller = labeller(
+      Trial = c(
+        "Historical" = "Historical Control Data",
+        "Current" = "Future Control Group"
+      )
+    )
+  ) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  #scale_shape_manual(values = study_shapes) +
+  guides(
+    #shape = guide_legend(nrow = 2, byrow = TRUE, order = 1),
+    color = guide_legend(nrow = 2, byrow = TRUE, order = 2)
+  ) +
+  theme_bw(base_size = 10) +
   labs(
-    title = "Comparison of 95% Simultaneous Prediction Intervals by Method and Category",
-    x = "Observed/Predicted Count",
-    y = "Method",
-    caption = "Intervals [Lower, Upper]; Circle = Predicted (y_hat); Red Cross = Observed (y_c)"
+    y = "Proportion of affected animals",
+    x = "Histopathological category",
+    #shape = "Historical study (within sex)",
+    color = "Prediction Interval Method"
   ) +
-  theme_bw() + # A clean theme
   theme(
-    axis.text.y = element_text(size = 10),
-    axis.title = element_text(face = "bold"),
-    strip.text = element_text(face = "bold", size = 12), # Facet titles
-    legend.position = "none"
+    legend.position = "bottom",
+    legend.box = "vertical"
   )
 
-# Display the plot
-print(pi_plot)
+print(plot_combined_lumbar_proportion)
 
-
-# Alternative 2 -----------------------------------------------------------
-
-
-# The corrected plot code
-# plot_pat_with_intervals <- df_pat_long %>%
-#   mutate(Trial = fct_relevel(Trial, "Historical", "Current")) %>%
-#   ggplot(
-#     aes(x = Categories) # Only map 'x' globally, since both layers use it
-#   ) +
-#   
-#   # Layer 1: Prediction intervals (uses 'interval_df')
-#   # This layer does NOT need or use 'value'
-#   geom_linerange(
-#     data = interval_df,
-#     aes(
-#       ymin = lower,
-#       ymax = upper,
-#       x = Categories
-#     ),
-#     alpha = 0.5,
-#     color = "red",
-#     linewidth = 1
-#   ) +
-#   
-#   # Layer 2: Data points (uses the main 'df_pat_long')
-#   # This layer gets its own 'y' and 'color' aesthetics
-#   geom_jitter(
-#     aes(y = value, color = factor(Study)), 
-#     height = 0, 
-#     width = 0.05,
-#     size = 4
-#   ) +
-#   
-#   # Apply faceting and theme as before
-#   facet_grid(~Trial) +
-#   theme_bw(base_size = 18) +
-#   labs(color = "Study", y = "Count", x = "Category")
-# 
-# # Now this will print without error
-# print(plot_pat_with_intervals)
+ggsave(
+  file.path(figures_dir, "plot_lumbar_trial_proportion.png"),
+  plot = plot_combined_lumbar_proportion,
+  width = 8,
+  height = 6,
+  units = "in",
+  dpi = 900
+)
